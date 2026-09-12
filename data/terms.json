@@ -1,0 +1,43 @@
+{
+  "affiliate_tag": "ryotaozawa101-21",
+  "marketplace": "amazon.fr",
+  "categories": [
+    { "id": "outil", "ja": "手道具", "fr": "Petit matériel" },
+    { "id": "moule", "ja": "型・器具", "fr": "Moules et matériel" }
+  ],
+  "terms": [
+    { "id": "maryse", "ja": "ゴムベラ", "fr": "maryse", "article": "une", "kana": "マリーズ", "category": "outil", "featured": true, "note": "最頻出。spatule とは言わない", "amazon_url": "" },
+    { "id": "corne", "ja": "カード", "fr": "corne", "article": "une", "kana": "コルヌ", "category": "outil", "featured": true, "note": "樹脂製。金属製は coupe-pâte", "amazon_url": "" },
+    { "id": "spatule-coudee", "ja": "パレットナイフ", "fr": "spatule coudée", "article": "une", "kana": "スパチュル・クデ", "category": "outil", "featured": false, "note": "coudée = L字型", "amazon_url": "" },
+    { "id": "fouet", "ja": "泡立て器", "fr": "fouet", "article": "un", "kana": "フエ", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "chinois", "ja": "こし器", "fr": "chinois", "article": "un", "kana": "シノワ", "category": "outil", "featured": false, "note": "目の細かいものは passoire fine とも", "amazon_url": "" },
+    { "id": "tamis", "ja": "ふるい", "fr": "tamis", "article": "un", "kana": "タミ", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "rouleau", "ja": "めん棒", "fr": "rouleau à pâtisserie", "article": "un", "kana": "ルロー・ア・パティスリー", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "pinceau", "ja": "刷毛", "fr": "pinceau", "article": "un", "kana": "パンソー", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "poche", "ja": "絞り袋", "fr": "poche à douille", "article": "une", "kana": "ポッシュ・ア・ドゥイユ", "category": "outil", "featured": true, "note": "使い捨てタイプが主流", "amazon_url": "" },
+    { "id": "douille", "ja": "口金", "fr": "douille", "article": "une", "kana": "ドゥイユ", "category": "outil", "featured": false, "note": "セット売りが多い", "amazon_url": "" },
+    { "id": "cul-de-poule", "ja": "ボウル（半球）", "fr": "cul-de-poule", "article": "un", "kana": "キュル・ド・プール", "category": "outil", "featured": true, "note": "直訳は「鶏の尻」", "amazon_url": "" },
+    { "id": "thermometre", "ja": "温度計", "fr": "thermomètre à sonde", "article": "un", "kana": "テルモメートル・ア・ソンド", "category": "outil", "featured": true, "note": "", "amazon_url": "" },
+    { "id": "balance", "ja": "デジタル秤", "fr": "balance de précision", "article": "une", "kana": "バランス・ド・プレシジョン", "category": "outil", "featured": true, "note": "0.1g 対応のものを選ぶ", "amazon_url": "" },
+    { "id": "grille", "ja": "ケーキクーラー", "fr": "grille", "article": "une", "kana": "グリーユ", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "plaque", "ja": "天板", "fr": "plaque de cuisson", "article": "une", "kana": "プラック・ド・キュイソン", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "tapis-silicone", "ja": "シルパット", "fr": "tapis de cuisson en silicone", "article": "un", "kana": "タピ・ド・キュイソン", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "papier-cuisson", "ja": "クッキングシート", "fr": "papier cuisson", "article": "du", "kana": "パピエ・キュイソン", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "peigne", "ja": "三角コーム", "fr": "peigne à décor", "article": "un", "kana": "ペーニュ・ア・デコール", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "couteau-scie", "ja": "パン切り包丁", "fr": "couteau-scie", "article": "un", "kana": "クトー・シー", "category": "outil", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "rape", "ja": "おろし器", "fr": "râpe", "article": "une", "kana": "ラープ", "category": "outil", "featured": false, "note": "Microplane が定番", "amazon_url": "" },
+
+    { "id": "cercle", "ja": "セルクル", "fr": "cercle", "article": "un", "kana": "セルクル", "category": "moule", "featured": false, "note": "à tarte / à entremets で用途が分かれる", "amazon_url": "" },
+    { "id": "cadre", "ja": "角型（枠）", "fr": "cadre", "article": "un", "kana": "カドル", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "moule-tarte", "ja": "タルト型", "fr": "moule à tarte", "article": "un", "kana": "ムール・ア・タルト", "category": "moule", "featured": false, "note": "à fond amovible = 底が取れるタイプ", "amazon_url": "" },
+    { "id": "moule-cake", "ja": "パウンド型", "fr": "moule à cake", "article": "un", "kana": "ムール・ア・ケーク", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "moule-silicone", "ja": "シリコン型", "fr": "moule en silicone", "article": "un", "kana": "ムール・アン・シリコーヌ", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "moule-madeleines", "ja": "マドレーヌ型", "fr": "moule à madeleines", "article": "un", "kana": "ムール・ア・マドレーヌ", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "moule-financiers", "ja": "フィナンシェ型", "fr": "moule à financiers", "article": "un", "kana": "ムール・ア・フィナンシエ", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "moule-canneles", "ja": "カヌレ型", "fr": "moule à cannelés", "article": "un", "kana": "ムール・ア・カヌレ", "category": "moule", "featured": false, "note": "銅製は高価", "amazon_url": "" },
+    { "id": "batteur", "ja": "ハンドミキサー", "fr": "batteur électrique", "article": "un", "kana": "バトゥール・エレクトリック", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "robot-patissier", "ja": "スタンドミキサー", "fr": "robot pâtissier", "article": "un", "kana": "ロボ・パティシエ", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "mixeur-plongeant", "ja": "ブレンダー", "fr": "mixeur plongeant", "article": "un", "kana": "ミクスール・プロンジャン", "category": "moule", "featured": false, "note": "", "amazon_url": "" },
+    { "id": "robot-coupe", "ja": "フードプロセッサー", "fr": "robot-coupe", "article": "un", "kana": "ロボ・クープ", "category": "moule", "featured": false, "note": "商品名が一般名詞化したもの", "amazon_url": "" }
+  ]
+}

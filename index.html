@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>日仏 製菓用語辞典 | Lexique de pâtisserie</title>
+<meta name="description" content="フランス菓子の道具・型の名前を、日本語・フランス語・カタカナで引ける対応表。">
+<meta name="theme-color" content="#8a4b2a">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🥐</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="wrap">
+    <h1 class="site-title">日仏 製菓用語辞典</h1>
+    <p class="site-sub">Lexique japonais–français de la pâtisserie</p>
+    <p class="site-lead">フランスで製菓道具を探すときの「これ、なんて言うの？」を引くための対応表です。</p>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="wrap">
+    <div class="search">
+      <svg class="search__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input id="search" type="search" inputmode="search" autocomplete="off"
+             placeholder="ゴムベラ / maryse / マリーズ"
+             aria-label="用語を検索（日本語・フランス語・カタカナ）">
+      <button id="clear" class="search__clear" type="button" aria-label="検索をクリア" hidden>&times;</button>
+    </div>
+    <div id="categories" class="chips" role="group" aria-label="カテゴリーで絞り込み"></div>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <section id="featured-section" class="section" hidden>
+    <h2 class="section__title" id="featured-title">まず揃えたい6点</h2>
+    <p class="section__note">最初の買い出しでこれだけ押さえておけば、たいていのレシピは動きます。</p>
+    <div id="featured-list" class="cards"></div>
+  </section>
+
+  <section class="section">
+    <div class="section__head">
+      <h2 class="section__title" id="results-title">すべての用語</h2>
+      <p class="count" id="count" role="status" aria-live="polite"></p>
+    </div>
+    <div id="list" class="cards"></div>
+    <p id="empty" class="empty" hidden>
+      該当する用語がありません。<br>
+      <span class="empty__hint">綴りを変えるか、カテゴリーを「すべて」に戻してみてください。</span>
+    </p>
+    <p id="loading" class="empty">読み込み中…</p>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap">
+    <p class="disclosure">Amazonアソシエイトとして、適格販売により収入を得ています。</p>
+    <p class="footer-note">価格・在庫はリンク先（Amazon.fr）でご確認ください。</p>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

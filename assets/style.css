@@ -1,0 +1,388 @@
+/* ---------------------------------------------------------------
+   日仏 製菓用語辞典 — mobile first
+   --------------------------------------------------------------- */
+
+:root {
+  --bg: #fbf7f2;
+  --surface: #ffffff;
+  --surface-2: #f5efe7;
+  --text: #2c2320;
+  --text-soft: #6d5f57;
+  --text-faint: #94857c;
+  --accent: #8a4b2a;
+  --accent-soft: #f0e2d6;
+  --border: #e6dbd0;
+  --mark: #ffe8a3;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(44, 35, 32, .06), 0 6px 18px rgba(44, 35, 32, .05);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17130f;
+    --surface: #211b17;
+    --surface-2: #2a221c;
+    --text: #f0e8e1;
+    --text-soft: #bfb0a5;
+    --text-faint: #93837a;
+    --accent: #e8a072;
+    --accent-soft: #3a2a1f;
+    --border: #3a302a;
+    --mark: #6a5312;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 18px rgba(0, 0, 0, .25);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", "Yu Gothic", sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  width: 100%;
+  max-width: 760px;
+  margin-inline: auto;
+  padding-inline: 16px;
+}
+
+/* --- header ---------------------------------------------------- */
+
+.site-header {
+  background: linear-gradient(180deg, var(--surface-2), var(--bg));
+  border-bottom: 1px solid var(--border);
+  padding-block: 28px 20px;
+}
+
+.site-title {
+  margin: 0;
+  font-size: 1.5rem;
+  letter-spacing: .02em;
+}
+
+.site-sub {
+  margin: 2px 0 0;
+  color: var(--accent);
+  font-size: .8rem;
+  font-style: italic;
+  letter-spacing: .04em;
+}
+
+.site-lead {
+  margin: 12px 0 0;
+  color: var(--text-soft);
+  font-size: .875rem;
+  line-height: 1.6;
+}
+
+/* --- toolbar (sticky) ------------------------------------------ */
+
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  padding-block: 10px;
+}
+
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search__icon {
+  position: absolute;
+  left: 12px;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--text-faint);
+  stroke-width: 2;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+
+#search {
+  width: 100%;
+  padding: 12px 40px 12px 38px;
+  font: inherit;
+  font-size: 1rem; /* 16px 未満だと iOS でズームする */
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+
+#search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+#search::-webkit-search-cancel-button { display: none; }
+
+.search__clear {
+  position: absolute;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--text-soft);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.search__clear:hover { background: var(--surface-2); }
+
+/* display 指定が [hidden] より強くなってしまうので明示的に打ち消す */
+.search__clear[hidden] { display: none; }
+
+/* --- category chips -------------------------------------------- */
+
+.chips {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding-bottom: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.chips::-webkit-scrollbar { display: none; }
+
+.chip {
+  flex: 0 0 auto;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: .8125rem;
+  line-height: 1.5;
+  color: var(--text-soft);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chip[aria-pressed="true"] {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .chip[aria-pressed="true"] { color: #1b140f; }
+}
+
+.chip__fr {
+  margin-left: 6px;
+  font-size: .75em;
+  font-style: italic;
+  opacity: .72;
+}
+
+/* --- sections --------------------------------------------------- */
+
+.section { margin-block: 28px; }
+
+.section__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  letter-spacing: .01em;
+}
+
+#featured-title::before {
+  content: "★";
+  margin-right: 6px;
+  color: var(--accent);
+}
+
+.section__note {
+  margin: 4px 0 0;
+  color: var(--text-faint);
+  font-size: .8125rem;
+}
+
+.count {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: .8125rem;
+  white-space: nowrap;
+}
+
+/* --- cards ------------------------------------------------------ */
+
+.cards {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.card {
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.card--featured { border-left: 3px solid var(--accent); }
+
+.card__fr {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--accent);
+  word-break: break-word;
+}
+
+.card__article {
+  margin-right: 4px;
+  font-size: .8125rem;
+  font-weight: 400;
+  font-style: italic;
+  color: var(--text-faint);
+}
+
+.card__kana {
+  margin: 1px 0 0;
+  font-size: .75rem;
+  color: var(--text-faint);
+  letter-spacing: .04em;
+}
+
+.card__ja {
+  margin: 6px 0 0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.card__note {
+  margin: 8px 0 0;
+  padding-left: 9px;
+  border-left: 2px solid var(--border);
+  font-size: .8125rem;
+  line-height: 1.6;
+  color: var(--text-soft);
+}
+
+.card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.tag {
+  padding: 2px 9px;
+  font-size: .6875rem;
+  color: var(--text-soft);
+  background: var(--surface-2);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.buy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 7px 14px;
+  font-size: .8125rem;
+  font-weight: 600;
+  text-decoration: none;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .buy { color: #1b140f; }
+}
+
+.buy:hover { filter: brightness(1.08); }
+.buy::after { content: "↗"; font-size: .75em; }
+
+mark {
+  padding: 0 1px;
+  color: inherit;
+  background: var(--mark);
+  border-radius: 3px;
+}
+
+/* --- empty / loading -------------------------------------------- */
+
+.empty {
+  margin: 28px 0;
+  text-align: center;
+  color: var(--text-soft);
+  font-size: .9375rem;
+}
+
+.empty__hint {
+  font-size: .8125rem;
+  color: var(--text-faint);
+}
+
+/* --- footer ------------------------------------------------------ */
+
+.site-footer {
+  margin-top: 40px;
+  padding-block: 20px 32px;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.disclosure {
+  margin: 0;
+  font-size: .8125rem;
+  color: var(--text-soft);
+}
+
+.footer-note {
+  margin: 6px 0 0;
+  font-size: .75rem;
+  color: var(--text-faint);
+}
+
+/* --- 広めの画面では 2 カラムに ---------------------------------- */
+
+@media (min-width: 640px) {
+  .site-header { padding-block: 40px 28px; }
+  .site-title { font-size: 1.875rem; }
+  .cards { grid-template-columns: 1fr 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
