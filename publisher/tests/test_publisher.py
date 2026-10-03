@@ -165,7 +165,7 @@ class NoteTest(unittest.TestCase):
         )
         self.assertIn("<h3", out)
         self.assertIn("<b>太字</b>と斜体<br>続き", out)
-        self.assertRegex(out, r"<ul[^>]*><li[^>]*>a</li><li[^>]*>b</li></ul>")
+        self.assertRegex(out, r"<ul[^>]*><li[^>]*><p[^>]*>a</p></li><li[^>]*><p[^>]*>b</p></li></ul>")
         self.assertIn("<hr", out)
         self.assertIn("x ／ y<br>1 ／ 2", out)
         self.assertIn("&lt;script&gt;", out)
