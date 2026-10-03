@@ -227,12 +227,20 @@ class NoteTest(unittest.TestCase):
     def test_cookie_header_prefix_is_stripped(self):
         self.assertEqual(NoteClient("cookie: a=1; b=2").cookie, "a=1; b=2")
 
+    def test_only_long_lived_cookies_are_sent(self):
+        raw = ("cookie: note_web_visitor_id=v; fp=f; _vid_v1=x; _note_session_v5=SESS; "
+               "note_gql_auth_token=SHORT; XSRF-TOKEN=tok")
+        self.assertEqual(NoteClient(raw).cookie, "_note_session_v5=SESS; XSRF-TOKEN=tok")
+
+    def test_bare_session_value_is_accepted(self):
+        self.assertEqual(NoteClient("abc123").cookie, "_note_session_v5=abc123")
+
     def test_not_login_reports_cookie_names_only(self):
         fake = FakeCurl([({"error": {"code": "auth", "message": "not_login"}}, 200),
                          ({"data": {"urlname": "ryota-secret"}}, 200)])
         with self.assertRaises(NoteError) as cm:
             NoteClient("a=secret1; _note_session_v5=secret2", runner=fake).create("T", "本文", publish=False)
-        self.assertIn("a, _note_session_v5", str(cm.exception))
+        self.assertIn("渡した Cookie の名前: _note_session_v5", str(cm.exception))
         self.assertIn("ログイン確認: HTTP 200 keys=['data'] data=['urlname']", str(cm.exception))
         self.assertIn("https://note.com/api/v2/current_user", fake.calls[1][0])
         self.assertNotIn("secret", str(cm.exception))
