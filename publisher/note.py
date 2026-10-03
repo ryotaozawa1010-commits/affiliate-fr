@@ -172,6 +172,19 @@ def _curl(run, method: str, path: str, body: dict | None, *, cookie: str | None,
     return (int(code) if code.isdigit() else 0), head, out
 
 
+def _shape(text: str) -> str:
+    """公開ログに個人情報を出さないよう、JSON はキー名だけ、それ以外は種類と長さだけを返す。"""
+    try:
+        obj = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return f"JSONではない（{len(text)}文字、先頭: {text[:15]!r}）"
+    if isinstance(obj, dict):
+        inner = obj.get("data")
+        sub = f" data={sorted(inner)[:20]}" if isinstance(inner, dict) else ""
+        return f"keys={sorted(obj)}{sub}"
+    return type(obj).__name__
+
+
 class NoteClient:
     def __init__(self, cookie: str, urlname: str | None = None, runner=subprocess.run):
         if not cookie:
@@ -196,7 +209,12 @@ class NoteClient:
             )
         cookies = re.findall(r"(?im)^set-cookie:\s*([^=;\s]+=[^;\r\n]*)", headers)
         if not cookies:
-            raise NoteError("note にログインできましたが、Cookie が返ってきませんでした")
+            # 原因調査用に、値を伏せたヘッダ名と本文の先頭だけを出す
+            names = sorted({l.split(":", 1)[0].strip().lower() for l in headers.splitlines() if ":" in l})
+            raise NoteError(
+                f"note にログインできましたが、Cookie が返ってきませんでした（HTTP {code}）。"
+                f"応答ヘッダ: {', '.join(names) or 'なし'} / 本文の形: {_shape(text)}"
+            )
         try:
             user = (json.loads(text).get("data") or {}) if text.strip() else {}
         except json.JSONDecodeError:
