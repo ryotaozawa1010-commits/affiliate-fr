@@ -308,6 +308,16 @@ class MainTest(unittest.TestCase):
         pt.assert_not_called()
         self.assertEqual(nc.login.return_value.create.call_args.kwargs, {"publish": False})
 
+    def test_cookie_is_preferred_over_password(self):
+        from publisher.note import NoteResult
+
+        env = {"NOTE_COOKIE": "_note_session_v5=abc", "NOTE_EMAIL": "me@example.com", "NOTE_PASSWORD": "pw"}
+        with mock.patch.dict(os.environ, env), mock.patch("publisher.main.NoteClient") as nc:
+            nc.return_value.create.return_value = NoteResult("1", "nabc", "draft", None)
+            main_mod.main([str(self.file)])
+        nc.login.assert_not_called()
+        nc.assert_called_once_with("_note_session_v5=abc", None)
+
     def test_test_file_is_always_dry_run(self):
         f = Path("publish/inbox/2026-10-03_test.md")
         f.write_text(self.file.read_text(encoding="utf-8"), encoding="utf-8")
