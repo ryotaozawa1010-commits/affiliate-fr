@@ -181,7 +181,9 @@ def _shape(text: str) -> str:
     if isinstance(obj, dict):
         inner = obj.get("data")
         sub = f" data={sorted(inner)[:20]}" if isinstance(inner, dict) else ""
-        return f"keys={sorted(obj)}{sub}"
+        # エラー内容（コードとメッセージ）は個人情報を含まないので表示する
+        err = f" error={json.dumps(obj['error'], ensure_ascii=False)[:200]}" if obj.get("error") else ""
+        return f"keys={sorted(obj)}{sub}{err}"
     return type(obj).__name__
 
 
