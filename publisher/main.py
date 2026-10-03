@@ -1,4 +1,4 @@
-"""publish/inbox/*.md を読んで note と X に投稿し、結果を publish/done/*.json に残す。
+"""publish/inbox/*.md（Gmail から受け取った公開版）を読んで note と X に投稿し、結果を publish/done/*.json に残す。
 
 使い方:
     python -m publisher.main publish/inbox/2026-10-04_weekend.md [--dry-run]

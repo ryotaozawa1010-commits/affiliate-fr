@@ -1,14 +1,16 @@
 name: マーケットレポート投稿（note / X）
 
 on:
-  push:
-    branches: [main]
-    paths: ["publish/inbox/**.md"]
+  schedule:
+    # Cowork の平日引け後版（毎日 20:30 UTC 起動・約30分で完成）を拾う時間帯
+    - cron: "*/10 20-23 * * 1-5"
+    # Cowork の週末版（日曜 08:00 パリ起動・約1〜2時間で完成）を拾う時間帯
+    - cron: "*/10 6-14 * * 0"
   workflow_dispatch:
     inputs:
       file:
-        description: "投稿するファイル（例: publish/inbox/2026-10-04_weekend.md）"
-        required: true
+        description: "既に publish/inbox/ にあるファイルを投稿し直す場合だけ指定（空なら Gmail を確認）"
+        required: false
       dry_run:
         description: "投稿せず内容の確認だけ"
         type: boolean
@@ -27,8 +29,6 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -36,21 +36,23 @@ jobs:
 
       - run: pip install -r publisher/requirements.txt
 
-      - name: 対象ファイルを決める
+      - name: Gmail から投稿用メールを受け取る
         id: files
         env:
-          BEFORE: ${{ github.event.before }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
           INPUT_FILE: ${{ inputs.file }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ -n "$INPUT_FILE" ]; then
             files="$INPUT_FILE"
-          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            files=$(git diff-tree --no-commit-id --name-only --diff-filter=AM -r HEAD -- 'publish/inbox/*.md')
+          elif [ -z "$GMAIL_APP_PASSWORD" ]; then
+            echo "GMAIL_APP_PASSWORD が未設定のため何もしません"; files=""
           else
-            files=$(git diff --name-only --diff-filter=AM "$BEFORE" HEAD -- 'publish/inbox/*.md')
+            files=$(python -m publisher.gmail_inbox fetch)
           fi
-          echo "files=$(echo $files)" >> "$GITHUB_OUTPUT"
-          echo "対象: $files"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "対象: ${files:-なし}"
 
       - name: 投稿
         if: steps.files.outputs.files != ''
@@ -66,13 +68,21 @@ jobs:
         run: |
           python -m publisher.main ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
 
-      - name: 投稿結果を記録（二重投稿防止）
-        if: always() && steps.files.outputs.files != ''
+      - name: 受け取ったファイルと投稿結果を記録（二重投稿防止）
+        if: always() && steps.files.outputs.files != '' && !inputs.dry_run
         run: |
-          git add publish/done
+          git add publish/inbox publish/done
           if git diff --cached --quiet; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "投稿結果を記録"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          git commit -m "投稿: ${{ steps.files.outputs.files }}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: 処理したメールに published ラベルを付ける
+        if: always() && !inputs.file && !inputs.dry_run
+        env:
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+        run: python -m publisher.gmail_inbox mark

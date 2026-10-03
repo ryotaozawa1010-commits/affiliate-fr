@@ -268,5 +268,105 @@ class MainTest(unittest.TestCase):
         pt.assert_not_called()
 
 
+class GmailExtractTest(unittest.TestCase):
+    ADDR = "me@gmail.com"
+
+    def mail(self, *, subject="[PUBLISH] 2026-10-04_weekend", sender=ADDR, token="secret-token",
+             body=None, html=False):
+        from email.message import EmailMessage
+
+        content = FIXTURE.read_text(encoding="utf-8")
+        text = body if body is not None else f"TOKEN: {token}\n-----BEGIN-----\n{content}\n-----END-----\n"
+        msg = EmailMessage()
+        msg["Subject"], msg["From"], msg["To"] = subject, f"Ryota <{sender}>", self.ADDR
+        if html:
+            msg.set_content("<div>" + text.replace("\n", "<br>") + "</div>", subtype="html")
+        else:
+            msg.set_content(text)
+        return msg.as_bytes()
+
+    def extract(self, raw):
+        from publisher.gmail_inbox import extract
+        return extract(raw, address=self.ADDR, token="secret-token")
+
+    def test_valid_mail_roundtrips_exactly(self):
+        stem, content = self.extract(self.mail())
+        self.assertEqual(stem, "2026-10-04_weekend")
+        self.assertEqual(content, FIXTURE.read_text(encoding="utf-8").strip() + "\n")
+        self.assertEqual(len(parse(content).x_posts), 5)
+
+    def test_rejects_wrong_sender_token_subject(self):
+        from publisher.gmail_inbox import Rejected
+
+        for raw in (self.mail(sender="evil@example.com"), self.mail(token="nope"),
+                    self.mail(subject="[PUBLISH] 2026-10-04_other"), self.mail(subject="Re: hi"),
+                    self.mail(body="TOKEN: secret-token\n本文だけ")):
+            with self.assertRaises(Rejected):
+                self.extract(raw)
+
+    def test_fetch_and_mark_with_fake_imap(self):
+        from publisher import gmail_inbox
+
+        good, bad = self.mail(), self.mail(token="nope")
+        stored = []
+
+        class FakeImap:
+            def __init__(self, host):
+                pass
+
+            def login(self, a, p):
+                assert p == "abcdabcdabcdabcd"
+
+            def select(self, box):
+                pass
+
+            def uid(self, cmd, *args):
+                if cmd == "SEARCH":
+                    assert "-label:published" in args[1]
+                    return "OK", [b"7 8"]
+                if cmd == "FETCH":
+                    return "OK", [(b"x", good if args[0] == b"7" else bad), b")"]
+                if cmd == "STORE":
+                    stored.append(args[0])
+                    return "OK", []
+
+            def logout(self):
+                pass
+
+        env = {"GMAIL_ADDRESS": self.ADDR, "GMAIL_APP_PASSWORD": "abcd abcd abcd abcd", "PUBLISH_TOKEN": "secret-token"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env), \
+                mock.patch.object(gmail_inbox.imaplib, "IMAP4_SSL", FakeImap):
+            cwd = os.getcwd()
+            os.chdir(d)
+            try:
+                saved = gmail_inbox.fetch()
+                self.assertEqual(saved, ["publish/inbox/2026-10-04_weekend.md"])
+                self.assertEqual(gmail_inbox.fetch(), [])  # 2回目は保存済み
+                gmail_inbox.mark()
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(stored, ["7"])  # なりすましメール(8)にはラベルを付けない
+
+    def test_real_mail_sent_by_gmail_connector(self):
+        # Cowork と同じ Gmail コネクタ（send_message）で実際に送ったメールの生データ
+        raw = Path(__file__).with_name("fixture_gmail_raw.eml").read_bytes()
+        stem, content = self.extract(raw)
+        self.assertEqual(stem, "2026-10-03_test")
+        p = parse(content)
+        self.assertEqual(build_thread(p.x_posts), ["受け渡しテストです📉 太字も入れておきます。", "これは2本目。#テスト"])
+        self.assertEqual(p.note_title, "【テスト】受け渡し確認")
+
+    def test_indented_body(self):
+        content = FIXTURE.read_text(encoding="utf-8")
+        indented = "\n".join("    " + l if l else l for l in content.split("\n"))
+        body = f"    TOKEN: secret-token\n    -----BEGIN-----\n{indented}\n    -----END-----\n"
+        stem, got = self.extract(self.mail(body=body))
+        self.assertEqual(got, content.strip() + "\n")
+
+    def test_html_only_mail(self):
+        stem, content = self.extract(self.mail(html=True))
+        self.assertEqual(len(parse(content).x_posts), 5)
+
+
 if __name__ == "__main__":
     unittest.main()
