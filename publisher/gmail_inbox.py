@@ -92,7 +92,8 @@ def fetch() -> list[str]:
     sender = os.environ.get("PUBLISH_SENDER", "").strip() or address
     token = os.environ["PUBLISH_TOKEN"].strip()
     imap = _connect()
-    query = f'from:{sender} subject:"[PUBLISH]" -label:{LABEL} newer_than:3d'
+    # X-GM-RAW の検索語は全体を "..." で囲んで送るので、中に " を入れない（件名の厳密な確認は extract で行う）
+    query = f"from:{sender} subject:PUBLISH -label:{LABEL} newer_than:3d"
     typ, data = imap.uid("SEARCH", "X-GM-RAW", f'"{query}"')
     uids = data[0].split() if typ == "OK" and data and data[0] else []
     saved, fetched = [], []

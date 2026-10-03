@@ -357,6 +357,8 @@ class GmailExtractTest(unittest.TestCase):
             def uid(self, cmd, *args):
                 if cmd == "SEARCH":
                     assert "-label:published" in args[1] and f"from:{GmailExtractTest.ADDR}" in args[1]
+                    # 全体を囲む " 以外に " が入ると Gmail が「Could not parse command」を返す
+                    assert args[1].startswith('"') and args[1].endswith('"') and '"' not in args[1][1:-1]
                     return "OK", [b"7 8"]
                 if cmd == "FETCH":
                     return "OK", [(b"x", good if args[0] == b"7" else bad), b")"]
