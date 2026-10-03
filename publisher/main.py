@@ -73,6 +73,11 @@ def process(path: Path, *, dry_run: bool) -> bool:
 
     premium = _env("X_PREMIUM").lower() == "true"
     publish_note = _env("NOTE_MODE").lower() == "publish"
+    if path.stem.endswith("_drafttest"):
+        # 接続確認用: note には必ず下書きで作り、X には出さない
+        publish_note = False
+        payload.x_posts = []
+        out.append("ファイル名が `_drafttest` で終わるため、note に下書きだけ作ります（公開・X 投稿はしません）。")
 
     # ---- note（X の最後のポストに記事リンクを付けるため先に処理する）
     note_url = (result.get("note") or {}).get("url")
