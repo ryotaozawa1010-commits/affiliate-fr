@@ -188,12 +188,28 @@ def _shape(text: str) -> str:
     return type(obj).__name__
 
 
+# 送る Cookie はログインの本体（数か月有効）と XSRF 対策だけに絞る。
+# ブラウザの Cookie には note_gql_auth_token など数分で切れる札も混ざっており、
+# 期限切れの札を一緒に送ると note は「未ログイン」と判定してしまう。
+KEEP_COOKIES = ("_note_session_v5", "XSRF-TOKEN")
+
+
+def _session_cookie(raw: str) -> str:
+    # 開発者ツールから「cookie: ...」の行ごとコピーされた場合に備えて見出しと改行を外す
+    raw = re.sub(r"(?i)^\s*cookie\s*:\s*", "", raw.strip()).replace("\n", "").replace("\r", "")
+    if "=" not in raw:
+        # _note_session_v5 の値だけが貼られた場合
+        return f"_note_session_v5={raw}"
+    pairs = [p.strip() for p in raw.split(";") if "=" in p]
+    kept = [p for p in pairs if p.split("=", 1)[0].strip() in KEEP_COOKIES]
+    return "; ".join(kept) if any(p.startswith("_note_session_v5=") for p in kept) else "; ".join(pairs)
+
+
 class NoteClient:
     def __init__(self, cookie: str, urlname: str | None = None, runner=subprocess.run):
         if not cookie:
             raise NoteError("note のログイン情報（Cookie）が空です")
-        # 開発者ツールから「cookie: ...」の行ごとコピーされた場合に備えて見出しを外す
-        self.cookie = re.sub(r"(?i)^\s*cookie\s*:\s*", "", cookie.strip()).replace("\n", "")
+        self.cookie = _session_cookie(cookie)
         self.urlname = urlname
         self._run = runner
 
