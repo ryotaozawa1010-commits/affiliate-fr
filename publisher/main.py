@@ -6,8 +6,8 @@
 環境変数（GitHub の Secrets / Variables から渡す）:
     X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_SECRET   … X 投稿用。無ければ X はスキップ
     X_PREMIUM=true      … X Premium で長文ポストが使える場合（分割しない）
-    NOTE_EMAIL, NOTE_PASSWORD … note のログイン情報。無ければ NOTE_COOKIE を見る
-    NOTE_COOKIE         … （代わりに）note にログインしたブラウザの Cookie。どちらも無ければ note はスキップ
+    NOTE_COOKIE         … note にログインしたブラウザの Cookie（優先）
+    NOTE_EMAIL, NOTE_PASSWORD … Cookie が無いときのログイン情報（note が reCAPTCHA を求めると失敗する）
     NOTE_URLNAME        … note のユーザー名（https://note.com/<ここ>）
     NOTE_MODE=draft|publish   … 既定は draft（下書き保存）
 """
@@ -39,9 +39,10 @@ def _x_creds() -> XCredentials | None:
 
 def _note_client() -> NoteClient:
     urlname = _env("NOTE_URLNAME") or None
-    if _env("NOTE_EMAIL") and _env("NOTE_PASSWORD"):
-        return NoteClient.login(_env("NOTE_EMAIL"), _env("NOTE_PASSWORD"), urlname)
-    return NoteClient(_env("NOTE_COOKIE"), urlname)
+    # note はパスワードだけのログインに reCAPTCHA を求めるため、ブラウザの Cookie があればそちらを優先する
+    if _env("NOTE_COOKIE"):
+        return NoteClient(_env("NOTE_COOKIE"), urlname)
+    return NoteClient.login(_env("NOTE_EMAIL"), _env("NOTE_PASSWORD"), urlname)
 
 
 def _summary(lines: list[str]) -> None:
@@ -88,7 +89,7 @@ def process(path: Path, *, dry_run: bool) -> bool:
             out.append(f"note（プレビュー）: 「{payload.note_title}」 本文 {len(payload.note_body)} 字 / "
                        f"{'公開' if publish_note else '下書き'}予定")
         elif not (_env("NOTE_EMAIL") and _env("NOTE_PASSWORD")) and not _env("NOTE_COOKIE"):
-            out.append("note: NOTE_EMAIL / NOTE_PASSWORD が未設定のためスキップ")
+            out.append("note: NOTE_COOKIE（または NOTE_EMAIL / NOTE_PASSWORD）が未設定のためスキップ")
         else:
             try:
                 r = _note_client().create(
