@@ -191,7 +191,8 @@ class NoteClient:
     def __init__(self, cookie: str, urlname: str | None = None, runner=subprocess.run):
         if not cookie:
             raise NoteError("note のログイン情報（Cookie）が空です")
-        self.cookie = cookie.strip()
+        # 開発者ツールから「cookie: ...」の行ごとコピーされた場合に備えて見出しを外す
+        self.cookie = re.sub(r"(?i)^\s*cookie\s*:\s*", "", cookie.strip()).replace("\n", "")
         self.urlname = urlname
         self._run = runner
 
@@ -243,7 +244,12 @@ class NoteClient:
         data = created.get("data") or {}
         note_id, key = str(data.get("id", "")), str(data.get("key", ""))
         if not note_id or not key:
-            raise NoteError(f"記事の枠を作れませんでした: {json.dumps(created)[:300]}")
+            # 原因調査用に Cookie の「名前」だけを出す（値は出さない）
+            names = [c.split("=", 1)[0].strip() for c in self.cookie.split(";") if "=" in c]
+            raise NoteError(
+                f"記事の枠を作れませんでした: {json.dumps(created, ensure_ascii=False)[:300]} "
+                f"/ 渡した Cookie の名前: {', '.join(names) or 'なし'}（{len(self.cookie)}文字）"
+            )
         urlname = self.urlname or (data.get("user") or {}).get("urlname")
 
         self._request(
