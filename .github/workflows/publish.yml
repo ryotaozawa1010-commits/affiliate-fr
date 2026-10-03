@@ -1,0 +1,78 @@
+name: マーケットレポート投稿（note / X）
+
+on:
+  push:
+    branches: [main]
+    paths: ["publish/inbox/**.md"]
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "投稿するファイル（例: publish/inbox/2026-10-04_weekend.md）"
+        required: true
+      dry_run:
+        description: "投稿せず内容の確認だけ"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r publisher/requirements.txt
+
+      - name: 対象ファイルを決める
+        id: files
+        env:
+          BEFORE: ${{ github.event.before }}
+          INPUT_FILE: ${{ inputs.file }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            files="$INPUT_FILE"
+          elif [ -z "$BEFORE" ] || [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            files=$(git diff-tree --no-commit-id --name-only --diff-filter=AM -r HEAD -- 'publish/inbox/*.md')
+          else
+            files=$(git diff --name-only --diff-filter=AM "$BEFORE" HEAD -- 'publish/inbox/*.md')
+          fi
+          echo "files=$(echo $files)" >> "$GITHUB_OUTPUT"
+          echo "対象: $files"
+
+      - name: 投稿
+        if: steps.files.outputs.files != ''
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          X_PREMIUM: ${{ vars.X_PREMIUM }}
+          NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
+          NOTE_URLNAME: ${{ vars.NOTE_URLNAME }}
+          NOTE_MODE: ${{ vars.NOTE_MODE }}
+        run: |
+          python -m publisher.main ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: 投稿結果を記録（二重投稿防止）
+        if: always() && steps.files.outputs.files != ''
+        run: |
+          git add publish/done
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "投稿結果を記録"
+          git pull --rebase origin main
+          git push origin HEAD:main
