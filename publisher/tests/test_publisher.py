@@ -224,6 +224,16 @@ class NoteTest(unittest.TestCase):
         with self.assertRaisesRegex(NoteError, "ログインに失敗"):
             NoteClient.login("me@example.com", "bad", runner=fake)
 
+    def test_cookie_header_prefix_is_stripped(self):
+        self.assertEqual(NoteClient("cookie: a=1; b=2").cookie, "a=1; b=2")
+
+    def test_not_login_reports_cookie_names_only(self):
+        fake = FakeCurl([({"error": {"code": "auth", "message": "not_login"}}, 200)])
+        with self.assertRaises(NoteError) as cm:
+            NoteClient("a=secret1; _note_session_v5=secret2", runner=fake).create("T", "本文", publish=False)
+        self.assertIn("a, _note_session_v5", str(cm.exception))
+        self.assertNotIn("secret", str(cm.exception))
+
     def test_auth_error_has_hint(self):
         fake = FakeCurl([({"error": "x"}, 403)])
         with self.assertRaisesRegex(NoteError, "ログインの期限切れ"):
