@@ -1,4 +1,4 @@
-name: マーケットレポート投稿（note / X）
+name: マーケットレポート投稿（note）
 
 on:
   schedule:
@@ -42,6 +42,7 @@ jobs:
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          PUBLISH_SENDER: ${{ vars.PUBLISH_SENDER }}
           INPUT_FILE: ${{ inputs.file }}
         run: |
           if [ -n "$INPUT_FILE" ]; then

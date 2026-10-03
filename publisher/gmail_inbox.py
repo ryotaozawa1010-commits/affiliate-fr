@@ -1,15 +1,16 @@
-"""Cowork が自分宛てに送った「投稿用メール」を Gmail から取り出し、publish/inbox/ に置く。
+"""Cowork が送った「投稿用メール」を受け取り用の Gmail から取り出し、publish/inbox/ に置く。
 
 メールの形式（Cowork のルーティンが Gmail コネクタで送る）:
 
-    宛先:   自分のアドレス
+    差出人: PUBLISH_SENDER（Cowork の Gmail コネクタのアドレス）
+    宛先:   GMAIL_ADDRESS（受け取り専用の Gmail。ここに IMAP でログインする）
     件名:   [PUBLISH] 2026-10-04_weekend        ← weekday / weekend / test
     本文:   TOKEN: <PUBLISH_TOKEN>
             -----BEGIN-----
-            # ① X投稿スレッド ...
+            # ② note記事 ...
             -----END-----
 
-なりすまし対策として、差出人が自分のアドレスであること・本文の TOKEN が
+なりすまし対策として、差出人が PUBLISH_SENDER であること・本文の TOKEN が
 GitHub Secret の PUBLISH_TOKEN と一致することの両方を確認する。
 処理したメールには Gmail のラベル「published」を付け、二度と拾わない。
 
@@ -58,15 +59,15 @@ def _plain_text(msg: Message) -> str:
     raise Rejected("本文がありません")
 
 
-def extract(raw: bytes, *, address: str, token: str) -> tuple[str, str]:
+def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
     """メール1通を検査して (ファイル名の stem, 中身) を返す。条件を満たさなければ Rejected。"""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
     m = SUBJECT_RE.search(str(msg.get("Subject", "")))
     if not m:
         raise Rejected("件名が [PUBLISH] YYYY-MM-DD_<種類> の形ではありません")
-    sender = parseaddr(str(msg.get("From", "")))[1].lower()
-    if sender != address.lower():
-        raise Rejected(f"差出人が自分ではありません: {sender}")
+    from_addr = parseaddr(str(msg.get("From", "")))[1].lower()
+    if from_addr != sender.lower():
+        raise Rejected(f"差出人が想定外です: {from_addr}")
     body = _plain_text(msg).replace("\r\n", "\n")
     t = TOKEN_RE.search(body)
     if not t or not hmac.compare_digest(t.group(1), token):
@@ -78,19 +79,20 @@ def extract(raw: bytes, *, address: str, token: str) -> tuple[str, str]:
     return m.group(1), textwrap.dedent(b.group(1)).strip() + "\n"
 
 
-def _connect() -> tuple[imaplib.IMAP4_SSL, str, str]:
-    address = os.environ["GMAIL_ADDRESS"].strip()
-    password = os.environ["GMAIL_APP_PASSWORD"].replace(" ", "")
-    token = os.environ["PUBLISH_TOKEN"].strip()
+def _connect() -> imaplib.IMAP4_SSL:
     imap = imaplib.IMAP4_SSL("imap.gmail.com")
-    imap.login(address, password)
+    imap.login(os.environ["GMAIL_ADDRESS"].strip(), os.environ["GMAIL_APP_PASSWORD"].replace(" ", ""))
     imap.select("INBOX")
-    return imap, address, token
+    return imap
 
 
 def fetch() -> list[str]:
-    imap, address, token = _connect()
-    query = f'from:{address} subject:"[PUBLISH]" -label:{LABEL} newer_than:3d'
+    address = os.environ["GMAIL_ADDRESS"].strip()
+    # 差出人の指定がなければ「自分から自分へ」とみなす
+    sender = os.environ.get("PUBLISH_SENDER", "").strip() or address
+    token = os.environ["PUBLISH_TOKEN"].strip()
+    imap = _connect()
+    query = f'from:{sender} subject:"[PUBLISH]" -label:{LABEL} newer_than:3d'
     typ, data = imap.uid("SEARCH", "X-GM-RAW", f'"{query}"')
     uids = data[0].split() if typ == "OK" and data and data[0] else []
     saved, fetched = [], []
@@ -100,7 +102,7 @@ def fetch() -> list[str]:
         if raw is None:
             continue
         try:
-            stem, content = extract(raw, address=address, token=token)
+            stem, content = extract(raw, sender=sender, token=token)
         except Rejected as e:
             print(f"スキップ（UID {uid.decode()}）: {e}", file=sys.stderr)
             continue
@@ -123,7 +125,7 @@ def mark() -> None:
     uids = json.loads(STATE_FILE.read_text())
     if not uids:
         return
-    imap, _, _ = _connect()
+    imap = _connect()
     for uid in uids:
         imap.uid("STORE", uid, "+X-GM-LABELS", f"({LABEL})")
     imap.logout()

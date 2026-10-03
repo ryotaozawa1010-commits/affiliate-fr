@@ -32,6 +32,10 @@ class ParseTest(unittest.TestCase):
         self.assertTrue(p.note_body.startswith("金は週足"))
         self.assertTrue(p.note_body.rstrip().endswith("ご自身の責任で行ってください。*"))
 
+    def test_note_only(self):
+        p = parse("# ② note記事\n## タイトル\nT\n## 本文\n本文\n")
+        self.assertEqual((p.x_posts, p.note_title, p.note_body), ([], "T", "本文"))
+
     def test_x_only(self):
         p = parse("# ① X投稿スレッド\n### 1/2\nいち\n### 2/2\nに\n")
         self.assertEqual(p.x_posts, ["いち", "に"])
@@ -287,7 +291,7 @@ class GmailExtractTest(unittest.TestCase):
 
     def extract(self, raw):
         from publisher.gmail_inbox import extract
-        return extract(raw, address=self.ADDR, token="secret-token")
+        return extract(raw, sender=self.ADDR, token="secret-token")
 
     def test_valid_mail_roundtrips_exactly(self):
         stem, content = self.extract(self.mail())
@@ -315,14 +319,14 @@ class GmailExtractTest(unittest.TestCase):
                 pass
 
             def login(self, a, p):
-                assert p == "abcdabcdabcdabcd"
+                assert (a, p) == ("inbox@gmail.com", "abcdabcdabcdabcd")
 
             def select(self, box):
                 pass
 
             def uid(self, cmd, *args):
                 if cmd == "SEARCH":
-                    assert "-label:published" in args[1]
+                    assert "-label:published" in args[1] and f"from:{GmailExtractTest.ADDR}" in args[1]
                     return "OK", [b"7 8"]
                 if cmd == "FETCH":
                     return "OK", [(b"x", good if args[0] == b"7" else bad), b")"]
@@ -333,7 +337,8 @@ class GmailExtractTest(unittest.TestCase):
             def logout(self):
                 pass
 
-        env = {"GMAIL_ADDRESS": self.ADDR, "GMAIL_APP_PASSWORD": "abcd abcd abcd abcd", "PUBLISH_TOKEN": "secret-token"}
+        env = {"GMAIL_ADDRESS": "inbox@gmail.com", "PUBLISH_SENDER": self.ADDR,
+               "GMAIL_APP_PASSWORD": "abcd abcd abcd abcd", "PUBLISH_TOKEN": "secret-token"}
         with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env), \
                 mock.patch.object(gmail_inbox.imaplib, "IMAP4_SSL", FakeImap):
             cwd = os.getcwd()
