@@ -39,10 +39,10 @@ jobs:
       - name: Gmail から投稿用メールを受け取る
         id: files
         env:
-          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_ADDRESS: ${{ vars.GMAIL_ADDRESS || 'u1132038801@gmail.com' }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
-          PUBLISH_SENDER: ${{ vars.PUBLISH_SENDER }}
+          PUBLISH_SENDER: ${{ vars.PUBLISH_SENDER || 'ryotaozawa1010@gmail.com' }}
           INPUT_FILE: ${{ inputs.file }}
         run: |
           if [ -n "$INPUT_FILE" ]; then
@@ -63,6 +63,8 @@ jobs:
           X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
           X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
           X_PREMIUM: ${{ vars.X_PREMIUM }}
+          NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
+          NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
           NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
           NOTE_URLNAME: ${{ vars.NOTE_URLNAME }}
           NOTE_MODE: ${{ vars.NOTE_MODE }}
@@ -83,7 +85,7 @@ jobs:
       - name: 処理したメールに published ラベルを付ける
         if: always() && !inputs.file && !inputs.dry_run
         env:
-          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_ADDRESS: ${{ vars.GMAIL_ADDRESS || 'u1132038801@gmail.com' }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
         run: python -m publisher.gmail_inbox mark

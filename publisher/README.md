@@ -27,45 +27,49 @@ Gmail を「郵便受け」にしているのは、Cowork がもともと Gmail 
 
 ## 初期設定（最初の1回だけ）
 
-GitHub のリポジトリ画面で **Settings → Secrets and variables → Actions** を開いて登録します
-（「Secrets」タブと「Variables」タブがあります）。
+受け取り用アドレス（u1132038801@gmail.com）と差出人（ryotaozawa1010@gmail.com）は
+`.github/workflows/publish.yml` に書いてあるので登録不要です。登録するのはパスワード類の4つだけです。
 
-### Gmail（必須・郵便受け）
+### 1. Gmail のアプリ パスワードを作る
 
-受け取り用アカウント **u1132038801@gmail.com** で次を行います。
-
-1. 2段階認証を有効にする（Google アカウント → セキュリティとログイン → 2段階認証プロセス）
-2. https://myaccount.google.com/apppasswords で「アプリ パスワード」を作成（名前は何でも可）
-3. 登録
-
-| 種類 | 名前 | 中身 |
-|---|---|---|
-| Secret | `GMAIL_ADDRESS` | `u1132038801@gmail.com` |
-| Secret | `GMAIL_APP_PASSWORD` | 上で作った16文字のアプリ パスワード |
-| Secret | `PUBLISH_TOKEN` | Cowork のルーティンの指示文に書いてある `TOKEN:` の値（合言葉。セットアップ時に Claude から伝えた値） |
-| Variable | `PUBLISH_SENDER` | `ryotaozawa1010@gmail.com`（Cowork がメールを送るアドレス） |
+受け取り用アカウント **u1132038801@gmail.com** で、2段階認証を有効にしたうえで
+https://myaccount.google.com/apppasswords を開き、名前（例: github）を入れて「作成」。
+表示された16文字（スペースは入っていてもOK）を控えます。
 
 アプリ パスワードは「受信箱の読み取り＋ラベル付け」にしか使いません（送信や削除はしません）。
 
-### note（必須）
+### 2. GitHub に Secret を4つ登録する
 
-note には公式の投稿 API がないため、**ログイン済みブラウザの Cookie** を使ってエディタと同じ操作を再現します。
+https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/secrets/actions/new を開き、
+「Name」と「Secret」を入れて **Add secret** を押す、を4回繰り返します。
 
-1. PC のブラウザで note にログイン
-2. 開発者ツール（F12）→ Network タブ → note.com へのリクエストを1つ選ぶ → Request Headers の `cookie:` の値を丸ごとコピー
-3. Secret `NOTE_COOKIE` に貼り付け
-4. Variable `NOTE_URLNAME` = あなたの note ID（`https://note.com/<ここ>`）
-
-| Variable `NOTE_MODE` | 動き |
+| Name | Secret に入れるもの |
 |---|---|
-| 未設定 / `draft`（既定） | 下書きに保存。note アプリで「公開」を押すだけの状態になる |
-| `publish` | そのまま公開する（**実験的**） |
+| `GMAIL_APP_PASSWORD` | 1 で作った16文字 |
+| `PUBLISH_TOKEN` | Cowork のルーティンの指示文にある `TOKEN:` の値（セットアップ時に Claude から伝えた値） |
+| `NOTE_EMAIL` | note にログインするメールアドレス |
+| `NOTE_PASSWORD` | note のパスワード |
+
+Secret は登録した本人にも二度と表示されません（上書きはできます）。リポジトリが公開でも、中身は外から見えません。
+
+### 3.（任意）設定の上書き
+
+https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/actions/new で Variable を追加すると動きを変えられます。
+
+| Name | 動き |
+|---|---|
+| `NOTE_MODE` | 未設定 / `draft`: 下書きに保存（既定）。`publish`: そのまま公開（**実験的**） |
+| `NOTE_URLNAME` | note の ID。通常はログイン時に自動で取れるので不要 |
+| `GMAIL_ADDRESS` / `PUBLISH_SENDER` | 受け取り用・差出人のアドレスを変えたいとき |
 
 最初の数日は `draft` で見た目（見出し・太字・箇条書きの変換）を確認し、問題なければ `publish` に切り替えるのがおすすめです。
 
-注意:
-- Cookie は数週間〜数か月で切れます。切れると Actions が失敗して GitHub からメールが届くので、取り直して貼り直してください。
-- note 側の仕様変更やアクセス制限で、ある日突然動かなくなることがあります。
+### note についての注意
+
+- note には公式の投稿 API がないため、ブラウザのエディタと同じ通信を再現しています。
+  note 側の仕様変更やロボット対策で、ある日突然動かなくなることがあります（失敗すると GitHub からメールが届きます）。
+- メールとパスワードでのログインが弾かれる場合は、代わりに PC のブラウザから Cookie を取り出して Secret `NOTE_COOKIE` に入れる方法もあります
+  （開発者ツール → Network → note.com へのリクエスト → Request Headers の `cookie:` の値）。
 - note は自動投稿を推奨していません。公開まで自動にするかどうかはご自身で判断してください。
 
 ### X（停止中・任意）
@@ -90,7 +94,7 @@ Secrets を登録したらこれで受け取りまで確認できます（3日�
 ## 止めたいとき
 
 - 一時停止: Actions タブ → 「マーケットレポート投稿（note）」→ 右上の「…」→ **Disable workflow**
-- note だけ止める: Secret `NOTE_COOKIE` を削除
+- note だけ止める: Secret `NOTE_PASSWORD` を削除
 
 ## ファイル構成
 

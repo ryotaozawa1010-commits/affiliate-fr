@@ -194,9 +194,39 @@ class NoteTest(unittest.TestCase):
         self.assertIn("PUT", cmd)
         self.assertEqual(body["status"], "published")
 
+    def test_login_with_email_and_password(self):
+        calls = []
+
+        def run(cmd, input=None, **kw):
+            calls.append((cmd, json.loads(input) if input else None))
+            if len(calls) == 1:
+                out = ("HTTP/2 201\r\nset-cookie: _note_session_v5=abc; path=/; HttpOnly\r\n"
+                       "Set-Cookie: XSRF-TOKEN=tok; path=/\r\n\r\n"
+                       + json.dumps({"data": {"urlname": "ryota"}}) + "\n201")
+            elif len(calls) == 2:
+                out = json.dumps({"data": {"id": 1, "key": "nabc"}}) + "\n201"
+            else:
+                out = "{}\n200"
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+        client = NoteClient.login("me@example.com", "pw", runner=run)
+        self.assertEqual(client.cookie, "_note_session_v5=abc; XSRF-TOKEN=tok")
+        self.assertEqual(client.urlname, "ryota")
+        login_cmd, login_body = calls[0]
+        self.assertEqual(login_body, {"login": "me@example.com", "password": "pw"})
+        self.assertNotIn("pw", " ".join(login_cmd))  # パスワードはコマンドラインに出さない
+        r = client.create("T", "本文", publish=True)
+        self.assertEqual(r.url, "https://note.com/ryota/n/nabc")
+        self.assertIn("X-XSRF-TOKEN: tok", calls[1][0])
+
+    def test_login_failure(self):
+        fake = FakeCurl([({"error": "invalid"}, 401)])
+        with self.assertRaisesRegex(NoteError, "ログインに失敗"):
+            NoteClient.login("me@example.com", "bad", runner=fake)
+
     def test_auth_error_has_hint(self):
         fake = FakeCurl([({"error": "x"}, 403)])
-        with self.assertRaisesRegex(NoteError, "NOTE_COOKIE を取り直して"):
+        with self.assertRaisesRegex(NoteError, "ログインの期限切れ"):
             NoteClient("a=1", runner=fake).create("T", "本文", publish=False)
 
 

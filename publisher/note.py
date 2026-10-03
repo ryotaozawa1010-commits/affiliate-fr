@@ -127,47 +127,88 @@ def _xsrf_from_cookie(cookie: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _curl(run, method: str, path: str, body: dict | None, *, cookie: str | None,
+          dump_headers: bool = False) -> tuple[int, str, str]:
+    """ブラウザに近いヘッダで note の API を呼び、(HTTP ステータス, 応答ヘッダ, 本文) を返す。"""
+    headers = [
+        f"User-Agent: {USER_AGENT}",
+        "Accept: application/json, text/plain, */*",
+        "Accept-Language: ja,en-US;q=0.9,en;q=0.8",
+        "Content-Type: application/json",
+        "Origin: https://editor.note.com",
+        "Referer: https://editor.note.com/",
+        "X-Requested-With: XMLHttpRequest",
+    ]
+    if cookie:
+        headers.append(f"Cookie: {cookie}")
+        xsrf = _xsrf_from_cookie(cookie)
+        if xsrf:
+            headers.append(f"X-XSRF-TOKEN: {xsrf}")
+    cmd = ["curl", "-sS", "--compressed", "-X", method, f"{BASE}{path}", "-w", "\n%{http_code}"]
+    if dump_headers:
+        cmd += ["-D", "-"]
+    for h in headers:
+        cmd += ["-H", h]
+    if body is not None:
+        # 本文（パスワードを含むことがある）はコマンドラインに載せず標準入力で渡す
+        cmd += ["--data-binary", "@-"]
+    proc = run(
+        cmd,
+        input=json.dumps(body, ensure_ascii=False) if body is not None else None,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if proc.returncode != 0:
+        raise NoteError(f"curl が失敗しました: {proc.stderr.strip()[:300]}")
+    out, _, code = proc.stdout.rpartition("\n")
+    head = ""
+    if dump_headers:
+        # -D - は本文の前に「ヘッダ + 空行」を出す（リダイレクト等で複数回出ることもある）
+        parts = re.split(r"\r?\n\r?\n", out)
+        while len(parts) > 1 and re.match(r"HTTP/", parts[0]):
+            head += parts.pop(0) + "\n"
+        out = "\n\n".join(parts)
+    return (int(code) if code.isdigit() else 0), head, out
+
+
 class NoteClient:
     def __init__(self, cookie: str, urlname: str | None = None, runner=subprocess.run):
         if not cookie:
-            raise NoteError("NOTE_COOKIE が空です")
+            raise NoteError("note のログイン情報（Cookie）が空です")
         self.cookie = cookie.strip()
         self.urlname = urlname
         self._run = runner
 
-    def _request(self, method: str, path: str, body: dict | None = None) -> dict:
-        headers = [
-            f"User-Agent: {USER_AGENT}",
-            "Accept: application/json, text/plain, */*",
-            "Accept-Language: ja,en-US;q=0.9,en;q=0.8",
-            "Content-Type: application/json",
-            "Origin: https://editor.note.com",
-            "Referer: https://editor.note.com/",
-            "X-Requested-With: XMLHttpRequest",
-            f"Cookie: {self.cookie}",
-        ]
-        xsrf = _xsrf_from_cookie(self.cookie)
-        if xsrf:
-            headers.append(f"X-XSRF-TOKEN: {xsrf}")
-        cmd = ["curl", "-sS", "--compressed", "-X", method, f"{BASE}{path}", "-w", "\n%{http_code}"]
-        for h in headers:
-            cmd += ["-H", h]
-        if body is not None:
-            cmd += ["--data-binary", "@-"]
-        proc = self._run(
-            cmd,
-            input=json.dumps(body, ensure_ascii=False) if body is not None else None,
-            capture_output=True,
-            text=True,
-            timeout=60,
+    @classmethod
+    def login(cls, email: str, password: str, urlname: str | None = None, runner=subprocess.run) -> "NoteClient":
+        """メールアドレスとパスワードでログインし、その Cookie を使うクライアントを返す。"""
+        if not email or not password:
+            raise NoteError("NOTE_EMAIL / NOTE_PASSWORD が空です")
+        code, headers, text = _curl(
+            runner, "POST", "/api/v1/sessions/sign_in", {"login": email, "password": password}, cookie=None,
+            dump_headers=True,
         )
-        if proc.returncode != 0:
-            raise NoteError(f"curl が失敗しました: {proc.stderr.strip()[:300]}")
-        text, _, code = proc.stdout.rpartition("\n")
-        if not code.isdigit() or not 200 <= int(code) < 300:
+        if not 200 <= code < 300:
+            raise NoteError(
+                f"note へのログインに失敗しました（HTTP {code}）。メールアドレス・パスワードを確認してください。"
+                f"正しいのに失敗する場合は note 側のロボット対策の可能性があります: {text[:200]}"
+            )
+        cookies = re.findall(r"(?im)^set-cookie:\s*([^=;\s]+=[^;\r\n]*)", headers)
+        if not cookies:
+            raise NoteError("note にログインできましたが、Cookie が返ってきませんでした")
+        try:
+            user = (json.loads(text).get("data") or {}) if text.strip() else {}
+        except json.JSONDecodeError:
+            user = {}
+        return cls("; ".join(cookies), urlname or user.get("urlname"), runner)
+
+    def _request(self, method: str, path: str, body: dict | None = None) -> dict:
+        code, _, text = _curl(self._run, method, path, body, cookie=self.cookie)
+        if not 200 <= code < 300:
             hint = ""
-            if code in ("401", "403"):
-                hint = "（Cookie の期限切れか、note 側のアクセス制限の可能性があります。NOTE_COOKIE を取り直してください）"
+            if code in (401, 403):
+                hint = "（ログインの期限切れか、note 側のアクセス制限の可能性があります）"
             raise NoteError(f"{method} {path} が HTTP {code} で失敗しました{hint}: {text[:300]}")
         try:
             return json.loads(text) if text.strip() else {}
