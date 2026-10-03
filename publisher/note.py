@@ -236,6 +236,14 @@ class NoteClient:
         except json.JSONDecodeError as e:
             raise NoteError(f"{method} {path} の応答が JSON ではありません: {text[:200]}") from e
 
+    def _whoami(self) -> str:
+        """同じ Cookie でログイン中のユーザーを問い合わせ、結果の要点だけを返す（個人情報は出さない）。"""
+        try:
+            code, _, text = _curl(self._run, "GET", "/api/v2/current_user", None, cookie=self.cookie)
+        except NoteError as e:
+            return f"問い合わせ失敗 {e}"
+        return f"HTTP {code} {_shape(text)}"
+
     def create(self, title: str, body_md: str, *, publish: bool) -> NoteResult:
         body_html = markdown_to_note_html(body_md)
         body_length = len(re.sub(r"<[^>]+>", "", body_html))
@@ -249,6 +257,7 @@ class NoteClient:
             raise NoteError(
                 f"記事の枠を作れませんでした: {json.dumps(created, ensure_ascii=False)[:300]} "
                 f"/ 渡した Cookie の名前: {', '.join(names) or 'なし'}（{len(self.cookie)}文字）"
+                f" / ログイン確認: {self._whoami()}"
             )
         urlname = self.urlname or (data.get("user") or {}).get("urlname")
 
