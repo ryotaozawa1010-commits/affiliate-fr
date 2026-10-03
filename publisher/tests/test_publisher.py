@@ -234,7 +234,7 @@ class NoteTest(unittest.TestCase):
             NoteClient("a=secret1; _note_session_v5=secret2", runner=fake).create("T", "本文", publish=False)
         self.assertIn("a, _note_session_v5", str(cm.exception))
         self.assertIn("ログイン確認: HTTP 200 keys=['data'] data=['urlname']", str(cm.exception))
-        self.assertEqual(fake.calls[1][0][4], "https://note.com/api/v2/current_user")
+        self.assertIn("https://note.com/api/v2/current_user", fake.calls[1][0])
         self.assertNotIn("secret", str(cm.exception))
 
     def test_auth_error_has_hint(self):
