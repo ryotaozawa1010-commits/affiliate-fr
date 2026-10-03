@@ -1,0 +1,22 @@
+name: note 入館証チェック
+
+on:
+  schedule:
+    # 毎日 18:00 UTC（パリ 19:00/20:00）。平日の引け後版より前に切れていないか確かめる
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r publisher/requirements.txt
+      - name: note にログインできるか確認（記事は作らない）
+        env:
+          NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
+        run: python -m publisher.note_check

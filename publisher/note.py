@@ -253,6 +253,16 @@ class NoteClient:
         except json.JSONDecodeError as e:
             raise NoteError(f"{method} {path} の応答が JSON ではありません: {text[:200]}") from e
 
+    def logged_in(self) -> bool:
+        """この Cookie で note にログインできているか。"""
+        code, _, text = _curl(self._run, "GET", "/api/v2/current_user", None, cookie=self.cookie)
+        if code != 200:
+            return False
+        try:
+            return bool((json.loads(text).get("data") or {}).get("urlname"))
+        except (json.JSONDecodeError, AttributeError):
+            return False
+
     def _whoami(self) -> str:
         """同じ Cookie でログイン中のユーザーを問い合わせ、結果の要点だけを返す（個人情報は出さない）。"""
         try:

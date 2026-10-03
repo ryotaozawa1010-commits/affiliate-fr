@@ -245,6 +245,10 @@ class NoteTest(unittest.TestCase):
         self.assertIn("https://note.com/api/v2/current_user", fake.calls[1][0])
         self.assertNotIn("secret", str(cm.exception))
 
+    def test_logged_in(self):
+        self.assertTrue(NoteClient("x", runner=FakeCurl([({"data": {"urlname": "r"}}, 200)])).logged_in())
+        self.assertFalse(NoteClient("x", runner=FakeCurl([({"data": {}}, 401)])).logged_in())
+
     def test_auth_error_has_hint(self):
         fake = FakeCurl([({"error": "x"}, 403)])
         with self.assertRaisesRegex(NoteError, "ログインの期限切れ"):
