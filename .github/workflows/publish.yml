@@ -1,0 +1,91 @@
+name: マーケットレポート投稿（note）
+
+on:
+  schedule:
+    # Cowork の平日引け後版（毎日 20:30 UTC 起動・約30分で完成）を拾う時間帯
+    - cron: "*/10 20-23 * * 1-5"
+    # Cowork の週末版（日曜 08:00 パリ起動・約1〜2時間で完成）を拾う時間帯
+    - cron: "*/10 6-14 * * 0"
+  workflow_dispatch:
+    inputs:
+      file:
+        description: "既に publish/inbox/ にあるファイルを投稿し直す場合だけ指定（空なら Gmail を確認）"
+        required: false
+      dry_run:
+        description: "投稿せず内容の確認だけ"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r publisher/requirements.txt
+
+      - name: Gmail から投稿用メールを受け取る
+        id: files
+        env:
+          GMAIL_ADDRESS: ${{ vars.GMAIL_ADDRESS || 'u1132038801@gmail.com' }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+          PUBLISH_SENDER: ${{ vars.PUBLISH_SENDER || 'ryotaozawa1010@gmail.com' }}
+          INPUT_FILE: ${{ inputs.file }}
+        run: |
+          if [ -n "$INPUT_FILE" ]; then
+            files="$INPUT_FILE"
+          elif [ -z "$GMAIL_APP_PASSWORD" ]; then
+            echo "GMAIL_APP_PASSWORD が未設定のため何もしません"; files=""
+          else
+            files=$(python -m publisher.gmail_inbox fetch)
+          fi
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+          echo "対象: ${files:-なし}"
+
+      - name: 投稿
+        if: steps.files.outputs.files != ''
+        env:
+          X_API_KEY: ${{ secrets.X_API_KEY }}
+          X_API_SECRET: ${{ secrets.X_API_SECRET }}
+          X_ACCESS_TOKEN: ${{ secrets.X_ACCESS_TOKEN }}
+          X_ACCESS_SECRET: ${{ secrets.X_ACCESS_SECRET }}
+          X_PREMIUM: ${{ vars.X_PREMIUM }}
+          NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
+          NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
+          NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
+          NOTE_URLNAME: ${{ vars.NOTE_URLNAME }}
+          NOTE_MODE: ${{ vars.NOTE_MODE }}
+        run: |
+          python -m publisher.main ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: 受け取ったファイルと投稿結果を記録（二重投稿防止）
+        if: always() && steps.files.outputs.files != '' && !inputs.dry_run
+        run: |
+          git add publish/inbox publish/done
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "投稿: ${{ steps.files.outputs.files }}"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+
+      - name: 処理したメールに published ラベルを付ける
+        if: always() && !inputs.file && !inputs.dry_run
+        env:
+          GMAIL_ADDRESS: ${{ vars.GMAIL_ADDRESS || 'u1132038801@gmail.com' }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
+        run: python -m publisher.gmail_inbox mark

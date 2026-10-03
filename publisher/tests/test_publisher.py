@@ -1,0 +1,407 @@
+import json
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from publisher import main as main_mod
+from publisher.note import NoteClient, NoteError, markdown_to_note_html
+from publisher.parse import ParseError, parse
+from publisher.xpost import (
+    XCredentials,
+    XPostError,
+    build_thread,
+    oauth1_header,
+    post_thread,
+    split_to_fit,
+    weighted_length,
+)
+
+FIXTURE = Path(__file__).with_name("fixture_weekend.md")
+
+
+class ParseTest(unittest.TestCase):
+    def test_real_weekend_output(self):
+        p = parse(FIXTURE.read_text(encoding="utf-8"))
+        self.assertEqual(len(p.x_posts), 5)
+        self.assertTrue(p.x_posts[0].startswith("【週末まとめ】"))
+        self.assertTrue(p.x_posts[4].endswith("全文👇"))
+        self.assertEqual(p.note_title, "【米国株】2026/09/27 今週の振り返りと週明けの展望")
+        self.assertTrue(p.note_body.startswith("金は週足"))
+        self.assertTrue(p.note_body.rstrip().endswith("ご自身の責任で行ってください。*"))
+
+    def test_note_only(self):
+        p = parse("# ② note記事\n## タイトル\nT\n## 本文\n本文\n")
+        self.assertEqual((p.x_posts, p.note_title, p.note_body), ([], "T", "本文"))
+
+    def test_x_only(self):
+        p = parse("# ① X投稿スレッド\n### 1/2\nいち\n### 2/2\nに\n")
+        self.assertEqual(p.x_posts, ["いち", "に"])
+        self.assertEqual(p.note_title, "")
+
+    def test_missing_sections(self):
+        with self.assertRaises(ParseError):
+            parse("# 何もない\n本文")
+
+    def test_note_without_body(self):
+        with self.assertRaises(ParseError):
+            parse("# ② note記事\n## タイトル\nT\n")
+
+
+class XTest(unittest.TestCase):
+    def test_weighted_length(self):
+        self.assertEqual(weighted_length("abc"), 3)
+        self.assertEqual(weighted_length("あいう"), 6)
+        self.assertEqual(weighted_length("見て https://note.com/a/n/" + "x" * 80), 4 + 1 + 23)
+        self.assertEqual(weighted_length("📉"), 2)
+        self.assertEqual(weighted_length("⚠️"), 2)
+
+    def test_split_respects_limit_and_keeps_text(self):
+        text = "。".join(["あ" * 50] * 8) + "。"
+        chunks = split_to_fit(text, 280)
+        self.assertTrue(all(weighted_length(c) <= 280 for c in chunks))
+        self.assertEqual("".join(chunks), text)
+
+    def test_split_prefers_line_breaks(self):
+        text = "\n".join(["い" * 100] * 3)
+        chunks = split_to_fit(text, 280)
+        self.assertEqual(chunks, ["い" * 100, "い" * 100, "い" * 100])
+
+    def test_real_thread_fits(self):
+        p = parse(FIXTURE.read_text(encoding="utf-8"))
+        thread = build_thread(p.x_posts, link="https://note.com/u/n/nabc")
+        self.assertTrue(all(weighted_length(t) <= 280 for t in thread))
+        self.assertNotIn("**", "".join(thread))
+        self.assertTrue(thread[-1].endswith("https://note.com/u/n/nabc"))
+        self.assertEqual(sum("https://" in t for t in thread), 1)
+        premium = build_thread(p.x_posts, premium=True)
+        self.assertEqual(len(premium), 5)
+
+    def test_oauth_signature_matches_oauthlib(self):
+        try:
+            from oauthlib.oauth1 import Client
+        except ImportError:
+            self.skipTest("oauthlib がないため比較できない")
+        creds = XCredentials(
+            "xvz1evFS4wEEPTGEFPHBog",
+            "kAcSOqF21Fu85e7zjz7ZN2U4ZRhfV3WpwPAoE3Z7kBw",
+            "370773112-GmHxMAgYyLbNEtIKZeRNFsMKPR9EyMZeS9weJAEb",
+            "LswwdoUaIvS8ltyTt5jkRh4J50vUPVVHtR2YPi5kE",
+        )
+        nonce, ts = "kYjzVBB8Y0ZFabxSWbWovY3uYSQ2pTgmZeNu2VS4cg", "1318622958"
+        ours = oauth1_header("POST", "https://api.x.com/2/tweets", creds, nonce=nonce, timestamp=ts)
+        ref = Client(creds.api_key, creds.api_secret, creds.access_token, creds.access_secret,
+                     nonce=nonce, timestamp=ts)
+        _, headers, _ = ref.sign("https://api.x.com/2/tweets", "POST")
+
+        def sig(h):
+            import re
+            return re.search(r'oauth_signature="([^"]+)"', h).group(1)
+
+        self.assertEqual(sig(ours), sig(headers["Authorization"]))
+
+    def test_post_thread_chains_replies(self):
+        calls = []
+
+        class Resp:
+            def __init__(self, i):
+                self.status_code, self._i, self.text = 201, i, ""
+
+            def json(self):
+                return {"data": {"id": str(100 + self._i)}}
+
+        class Sess:
+            def post(self, url, json, headers, timeout):
+                calls.append(json)
+                return Resp(len(calls))
+
+        creds = XCredentials("a", "b", "c", "d")
+        ids = post_thread(["1", "2", "3"], creds, session=Sess())
+        self.assertEqual(ids, ["101", "102", "103"])
+        self.assertNotIn("reply", calls[0])
+        self.assertEqual(calls[1]["reply"], {"in_reply_to_tweet_id": "101"})
+        self.assertEqual(calls[2]["reply"], {"in_reply_to_tweet_id": "102"})
+
+    def test_post_thread_reports_partial(self):
+        class Resp:
+            def __init__(self, ok):
+                self.status_code = 201 if ok else 429
+                self.text = "Too Many Requests"
+
+            def json(self):
+                return {"data": {"id": "1"}}
+
+        class Sess:
+            n = 0
+
+            def post(self, *a, **k):
+                Sess.n += 1
+                return Resp(Sess.n == 1)
+
+        with self.assertRaises(XPostError) as cm:
+            post_thread(["a", "b"], XCredentials("a", "b", "c", "d"), session=Sess())
+        self.assertEqual(cm.exception.posted_ids, ["1"])
+
+
+class FakeCurl:
+    """curl の呼び出しを記録し、決められた応答を返す。"""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def __call__(self, cmd, input=None, **kw):
+        self.calls.append((cmd, json.loads(input) if input else None))
+        body, code = self.responses.pop(0)
+        return subprocess.CompletedProcess(cmd, 0, f"{json.dumps(body)}\n{code}", "")
+
+
+class NoteTest(unittest.TestCase):
+    def test_markdown_conversion(self):
+        out = markdown_to_note_html(
+            "### 見出し\n\n**太字**と*斜体*\n続き\n\n- a\n- b\n\n---\n\n| x | y |\n|---|---|\n| 1 | 2 |\n\n<script>"
+        )
+        self.assertIn("<h3", out)
+        self.assertIn("<b>太字</b>と斜体<br>続き", out)
+        self.assertRegex(out, r"<ul[^>]*><li[^>]*>a</li><li[^>]*>b</li></ul>")
+        self.assertIn("<hr", out)
+        self.assertIn("x ／ y<br>1 ／ 2", out)
+        self.assertIn("&lt;script&gt;", out)
+
+    def test_real_article_converts(self):
+        p = parse(FIXTURE.read_text(encoding="utf-8"))
+        out = markdown_to_note_html(p.note_body)
+        self.assertNotIn("**", out)
+        self.assertIn("<h3", out)
+
+    def test_draft_flow(self):
+        fake = FakeCurl([({"data": {"id": 1, "key": "nabc"}}, 201), ({}, 200)])
+        r = NoteClient("a=1; XSRF-TOKEN=tok", "ryota", runner=fake).create("T", "本文", publish=False)
+        self.assertEqual((r.status, r.url), ("draft", None))
+        self.assertEqual(len(fake.calls), 2)
+        cmd, body = fake.calls[1]
+        self.assertIn("https://note.com/api/v1/text_notes/draft_save?id=1&is_temp_saved=true", cmd)
+        self.assertIn("X-XSRF-TOKEN: tok", cmd)
+        self.assertEqual(body["name"], "T")
+
+    def test_publish_flow(self):
+        fake = FakeCurl([({"data": {"id": 1, "key": "nabc"}}, 201), ({}, 200), ({}, 200)])
+        r = NoteClient("a=1", "ryota", runner=fake).create("T", "本文", publish=True)
+        self.assertEqual(r.url, "https://note.com/ryota/n/nabc")
+        cmd, body = fake.calls[2]
+        self.assertIn("PUT", cmd)
+        self.assertEqual(body["status"], "published")
+
+    def test_login_with_email_and_password(self):
+        calls = []
+
+        def run(cmd, input=None, **kw):
+            calls.append((cmd, json.loads(input) if input else None))
+            if len(calls) == 1:
+                out = ("HTTP/2 201\r\nset-cookie: _note_session_v5=abc; path=/; HttpOnly\r\n"
+                       "Set-Cookie: XSRF-TOKEN=tok; path=/\r\n\r\n"
+                       + json.dumps({"data": {"urlname": "ryota"}}) + "\n201")
+            elif len(calls) == 2:
+                out = json.dumps({"data": {"id": 1, "key": "nabc"}}) + "\n201"
+            else:
+                out = "{}\n200"
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+        client = NoteClient.login("me@example.com", "pw", runner=run)
+        self.assertEqual(client.cookie, "_note_session_v5=abc; XSRF-TOKEN=tok")
+        self.assertEqual(client.urlname, "ryota")
+        login_cmd, login_body = calls[0]
+        self.assertEqual(login_body, {"login": "me@example.com", "password": "pw"})
+        self.assertNotIn("pw", " ".join(login_cmd))  # パスワードはコマンドラインに出さない
+        r = client.create("T", "本文", publish=True)
+        self.assertEqual(r.url, "https://note.com/ryota/n/nabc")
+        self.assertIn("X-XSRF-TOKEN: tok", calls[1][0])
+
+    def test_login_failure(self):
+        fake = FakeCurl([({"error": "invalid"}, 401)])
+        with self.assertRaisesRegex(NoteError, "ログインに失敗"):
+            NoteClient.login("me@example.com", "bad", runner=fake)
+
+    def test_auth_error_has_hint(self):
+        fake = FakeCurl([({"error": "x"}, 403)])
+        with self.assertRaisesRegex(NoteError, "ログインの期限切れ"):
+            NoteClient("a=1", runner=fake).create("T", "本文", publish=False)
+
+
+class MainTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        Path("publish/inbox").mkdir(parents=True)
+        self.file = Path("publish/inbox/2026-09-27_weekend.md")
+        self.file.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        self.tmp.cleanup()
+
+    def test_dry_run_posts_nothing(self):
+        with mock.patch.dict(os.environ, {"X_API_KEY": "a", "X_API_SECRET": "b", "X_ACCESS_TOKEN": "c",
+                                          "X_ACCESS_SECRET": "d", "NOTE_COOKIE": "x"}), \
+                mock.patch("publisher.main.post_thread") as pt, mock.patch("publisher.main.NoteClient") as nc:
+            self.assertEqual(main_mod.main([str(self.file), "--dry-run"]), 0)
+        pt.assert_not_called()
+        nc.assert_not_called()
+        self.assertFalse(Path("publish/done").exists())
+
+    def test_live_run_records_and_is_idempotent(self):
+        env = {"X_API_KEY": "a", "X_API_SECRET": "b", "X_ACCESS_TOKEN": "c", "X_ACCESS_SECRET": "d",
+               "NOTE_COOKIE": "x", "NOTE_MODE": "publish"}
+        from publisher.note import NoteResult
+
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("publisher.main.post_thread", return_value=["1", "2"]) as pt, \
+                mock.patch("publisher.main.NoteClient") as nc:
+            nc.return_value.create.return_value = NoteResult("1", "nabc", "published", "https://note.com/u/n/nabc")
+            self.assertEqual(main_mod.main([str(self.file)]), 0)
+            thread = pt.call_args[0][0]
+            self.assertTrue(thread[-1].endswith("https://note.com/u/n/nabc"))
+            # 2 回目は何も投稿しない
+            self.assertEqual(main_mod.main([str(self.file)]), 0)
+            self.assertEqual(pt.call_count, 1)
+            self.assertEqual(nc.return_value.create.call_count, 1)
+        saved = json.loads(Path("publish/done/2026-09-27_weekend.json").read_text())
+        self.assertEqual(saved["x"]["ids"], ["1", "2"])
+        self.assertEqual(saved["note"]["status"], "published")
+
+    def test_draft_mode_has_no_link(self):
+        from publisher.note import NoteResult
+
+        env = {"X_API_KEY": "a", "X_API_SECRET": "b", "X_ACCESS_TOKEN": "c", "X_ACCESS_SECRET": "d",
+               "NOTE_COOKIE": "x", "NOTE_MODE": ""}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("publisher.main.post_thread", return_value=["1"]) as pt, \
+                mock.patch("publisher.main.NoteClient") as nc:
+            nc.return_value.create.return_value = NoteResult("1", "nabc", "draft", None)
+            main_mod.main([str(self.file)])
+        self.assertFalse(any("https://" in t for t in pt.call_args[0][0]))
+
+    def test_note_failure_still_posts_x_and_fails_job(self):
+        env = {"X_API_KEY": "a", "X_API_SECRET": "b", "X_ACCESS_TOKEN": "c", "X_ACCESS_SECRET": "d",
+               "NOTE_COOKIE": "x"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("publisher.main.post_thread", return_value=["1"]) as pt, \
+                mock.patch("publisher.main.NoteClient") as nc:
+            nc.return_value.create.side_effect = NoteError("403")
+            self.assertEqual(main_mod.main([str(self.file)]), 1)
+        pt.assert_called_once()
+
+    def test_test_file_is_always_dry_run(self):
+        f = Path("publish/inbox/2026-10-03_test.md")
+        f.write_text(self.file.read_text(encoding="utf-8"), encoding="utf-8")
+        with mock.patch("publisher.main.post_thread") as pt:
+            self.assertEqual(main_mod.main([str(f)]), 0)
+        pt.assert_not_called()
+
+
+class GmailExtractTest(unittest.TestCase):
+    ADDR = "me@gmail.com"
+
+    def mail(self, *, subject="[PUBLISH] 2026-10-04_weekend", sender=ADDR, token="secret-token",
+             body=None, html=False):
+        from email.message import EmailMessage
+
+        content = FIXTURE.read_text(encoding="utf-8")
+        text = body if body is not None else f"TOKEN: {token}\n-----BEGIN-----\n{content}\n-----END-----\n"
+        msg = EmailMessage()
+        msg["Subject"], msg["From"], msg["To"] = subject, f"Ryota <{sender}>", self.ADDR
+        if html:
+            msg.set_content("<div>" + text.replace("\n", "<br>") + "</div>", subtype="html")
+        else:
+            msg.set_content(text)
+        return msg.as_bytes()
+
+    def extract(self, raw):
+        from publisher.gmail_inbox import extract
+        return extract(raw, sender=self.ADDR, token="secret-token")
+
+    def test_valid_mail_roundtrips_exactly(self):
+        stem, content = self.extract(self.mail())
+        self.assertEqual(stem, "2026-10-04_weekend")
+        self.assertEqual(content, FIXTURE.read_text(encoding="utf-8").strip() + "\n")
+        self.assertEqual(len(parse(content).x_posts), 5)
+
+    def test_rejects_wrong_sender_token_subject(self):
+        from publisher.gmail_inbox import Rejected
+
+        for raw in (self.mail(sender="evil@example.com"), self.mail(token="nope"),
+                    self.mail(subject="[PUBLISH] 2026-10-04_other"), self.mail(subject="Re: hi"),
+                    self.mail(body="TOKEN: secret-token\n本文だけ")):
+            with self.assertRaises(Rejected):
+                self.extract(raw)
+
+    def test_fetch_and_mark_with_fake_imap(self):
+        from publisher import gmail_inbox
+
+        good, bad = self.mail(), self.mail(token="nope")
+        stored = []
+
+        class FakeImap:
+            def __init__(self, host):
+                pass
+
+            def login(self, a, p):
+                assert (a, p) == ("inbox@gmail.com", "abcdabcdabcdabcd")
+
+            def select(self, box):
+                pass
+
+            def uid(self, cmd, *args):
+                if cmd == "SEARCH":
+                    assert "-label:published" in args[1] and f"from:{GmailExtractTest.ADDR}" in args[1]
+                    return "OK", [b"7 8"]
+                if cmd == "FETCH":
+                    return "OK", [(b"x", good if args[0] == b"7" else bad), b")"]
+                if cmd == "STORE":
+                    stored.append(args[0])
+                    return "OK", []
+
+            def logout(self):
+                pass
+
+        env = {"GMAIL_ADDRESS": "inbox@gmail.com", "PUBLISH_SENDER": self.ADDR,
+               "GMAIL_APP_PASSWORD": "abcd abcd abcd abcd", "PUBLISH_TOKEN": "secret-token"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, env), \
+                mock.patch.object(gmail_inbox.imaplib, "IMAP4_SSL", FakeImap):
+            cwd = os.getcwd()
+            os.chdir(d)
+            try:
+                saved = gmail_inbox.fetch()
+                self.assertEqual(saved, ["publish/inbox/2026-10-04_weekend.md"])
+                self.assertEqual(gmail_inbox.fetch(), [])  # 2回目は保存済み
+                gmail_inbox.mark()
+            finally:
+                os.chdir(cwd)
+        self.assertEqual(stored, ["7"])  # なりすましメール(8)にはラベルを付けない
+
+    def test_real_mail_sent_by_gmail_connector(self):
+        # Cowork と同じ Gmail コネクタ（send_message）で実際に送ったメールの生データ
+        raw = Path(__file__).with_name("fixture_gmail_raw.eml").read_bytes()
+        stem, content = self.extract(raw)
+        self.assertEqual(stem, "2026-10-03_test")
+        p = parse(content)
+        self.assertEqual(build_thread(p.x_posts), ["受け渡しテストです📉 太字も入れておきます。", "これは2本目。#テスト"])
+        self.assertEqual(p.note_title, "【テスト】受け渡し確認")
+
+    def test_indented_body(self):
+        content = FIXTURE.read_text(encoding="utf-8")
+        indented = "\n".join("    " + l if l else l for l in content.split("\n"))
+        body = f"    TOKEN: secret-token\n    -----BEGIN-----\n{indented}\n    -----END-----\n"
+        stem, got = self.extract(self.mail(body=body))
+        self.assertEqual(got, content.strip() + "\n")
+
+    def test_html_only_mail(self):
+        stem, content = self.extract(self.mail(html=True))
+        self.assertEqual(len(parse(content).x_posts), 5)
+
+
+if __name__ == "__main__":
+    unittest.main()
