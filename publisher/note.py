@@ -70,7 +70,8 @@ def markdown_to_note_html(md: str) -> str:
                 re.match(r"^\s*[-*・]\s+", lines[i]) or re.match(r"^\s*\d+[.)]\s+", lines[i])
             ):
                 item = re.sub(r"^\s*(?:[-*・]|\d+[.)])\s+", "", lines[i])
-                items.append(f"<li{_attrs()}>{_inline(item)}</li>")
+                # note のエディタは箇条書きの中身が段落（<p>）でないと文字を捨てるので包む
+                items.append(f"<li{_attrs()}><p{_attrs()}>{_inline(item)}</p></li>")
                 i += 1
             tag = "ol" if ordered else "ul"
             blocks.append(f"<{tag}{_attrs()}>{''.join(items)}</{tag}>")
@@ -80,7 +81,7 @@ def markdown_to_note_html(md: str) -> str:
             while i < len(lines) and lines[i].strip().startswith(">"):
                 quote.append(_inline(lines[i].strip().lstrip(">").strip()))
                 i += 1
-            blocks.append(f"<blockquote{_attrs()}><p>{'<br>'.join(quote)}</p></blockquote>")
+            blocks.append(f"<blockquote{_attrs()}><p{_attrs()}>{'<br>'.join(quote)}</p></blockquote>")
             continue
         if stripped.startswith("|"):
             # note は表を持てないので、1行ずつ「・ セル / セル」の段落にする
