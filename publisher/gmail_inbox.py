@@ -38,7 +38,7 @@ from pathlib import Path
 INBOX_DIR = Path("publish/inbox")
 STATE_FILE = Path(".gmail_fetched.json")  # fetch → mark の受け渡し用（コミットしない）
 LABEL = "published"
-SUBJECT_RE = re.compile(r"\[PUBLISH\]\s*(\d{4}-\d{2}-\d{2}_(?:weekday|weekend|test))\b")
+SUBJECT_RE = re.compile(r"\[PUBLISH\]\s*(\d{4}-\d{2}-\d{2}_(?:weekday|weekend|test|drafttest))\b")
 BODY_RE = re.compile(r"-----BEGIN-----[ \t]*\r?\n(.*?)\r?\n[ \t]*-----END-----", re.S)
 TOKEN_RE = re.compile(r"^[ \t>]*TOKEN:\s*(\S+)\s*$", re.M)
 

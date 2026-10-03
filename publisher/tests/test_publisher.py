@@ -294,6 +294,20 @@ class MainTest(unittest.TestCase):
             self.assertEqual(main_mod.main([str(self.file)]), 1)
         pt.assert_called_once()
 
+    def test_drafttest_file_creates_draft_only(self):
+        from publisher.note import NoteResult
+
+        f = Path("publish/inbox/2026-10-03_drafttest.md")
+        f.write_text(self.file.read_text(encoding="utf-8"), encoding="utf-8")
+        env = {"X_API_KEY": "a", "X_API_SECRET": "b", "X_ACCESS_TOKEN": "c", "X_ACCESS_SECRET": "d",
+               "NOTE_EMAIL": "me@example.com", "NOTE_PASSWORD": "pw", "NOTE_MODE": "publish"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("publisher.main.post_thread") as pt, mock.patch("publisher.main.NoteClient") as nc:
+            nc.login.return_value.create.return_value = NoteResult("1", "nabc", "draft", None)
+            self.assertEqual(main_mod.main([str(f)]), 0)
+        pt.assert_not_called()
+        self.assertEqual(nc.login.return_value.create.call_args.kwargs, {"publish": False})
+
     def test_test_file_is_always_dry_run(self):
         f = Path("publish/inbox/2026-10-03_test.md")
         f.write_text(self.file.read_text(encoding="utf-8"), encoding="utf-8")
