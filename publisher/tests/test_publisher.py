@@ -461,6 +461,30 @@ class GmailExtractTest(unittest.TestCase):
         self.assertIn("情報技術が +1.80%、ヘルスケアが −2.65%。\n", content)
         self.assertIn('{"title": "騰落率", "source": "S&P"}', content)
 
+    def test_gmail_hard_wraps_use_html_line_breaks(self):
+        # 2026-10-04 の実メール: 受け取ったテキスト版は約75字で空白の位置に改行が入っていた（HTML 版は元のまま）
+        from email.message import EmailMessage
+
+        body = ("TOKEN: secret-token\n-----BEGIN-----\n# ② note記事\n## タイトル\nT\n## 本文\n"
+                "ところが中を開けると、情報技術が +1.80%、ヘルスケアが −2.65% で、**開き**ができていました。\n"
+                "金：R1 が生命線**\nBTC：週足は上昇 & 収縮\n-----END-----")
+        wrapped = body.replace("情報技術が +1.80%", "情報技術が\n+1.80%")
+        rich = "<div dir=\"auto\">" + body.replace("&", "&amp;").replace("\n", "<br/>\n") + "</div>"
+
+        def raw(plain, html_body):
+            msg = EmailMessage()
+            msg["Subject"], msg["From"], msg["To"] = "[PUBLISH] 2026-10-04_weekend", self.ADDR, self.ADDR
+            msg.set_content(plain)
+            msg.add_alternative(html_body, subtype="html")
+            return msg.as_bytes()
+
+        _, content = self.extract(raw(wrapped, rich))
+        self.assertIn("情報技術が +1.80%、ヘルスケアが −2.65% で、**開き**ができていました。\n", content)
+        self.assertIn("生命線**\nBTC：週足は上昇 & 収縮", content)  # 本物の改行は残る
+        # HTML 版の中身が違うときはテキスト版をそのまま使う
+        _, content = self.extract(raw(wrapped, rich.replace("収縮", "拡大")))
+        self.assertIn("情報技術が\n+1.80%", content)
+
     def test_indented_body(self):
         content = FIXTURE.read_text(encoding="utf-8")
         indented = "\n".join("    " + l if l else l for l in content.split("\n"))
