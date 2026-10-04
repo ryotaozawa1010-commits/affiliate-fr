@@ -21,6 +21,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from publisher import affiliate
 from publisher.charts import embed
 from publisher.note import NoteClient, NoteError
 from publisher.parse import ParseError, parse
@@ -84,6 +85,7 @@ def process(path: Path, *, dry_run: bool) -> bool:
     except ParseError as e:
         _summary(out + [f"❌ 読み取り失敗: {e}"])
         return False
+    payload.note_body = affiliate.apply(payload.note_body)
 
     premium = _env("X_PREMIUM").lower() == "true"
     publish_note = _env("NOTE_MODE").lower() == "publish"

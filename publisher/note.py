@@ -30,8 +30,13 @@ USER_AGENT = (
 # ---------------------------------------------------------------- Markdown → note HTML
 
 
+LINK = re.compile(r"\[([^\]]+)\]\((https?://[^\s)]+)\)")
+
+
 def _inline(text: str) -> str:
-    text = html.escape(text, quote=False)
+    text = html.escape(text)
+    # [文字](URL) はリンクに（広告枠のアフィリエイトリンク用。nofollow は検索エンジン向けの広告の作法）
+    text = LINK.sub(r'<a href="\2" target="_blank" rel="nofollow noopener noreferrer">\1</a>', text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     # note のエディタに斜体はないので記号だけ外す
     text = re.sub(r"(?<!\*)\*(?![\s*])(.+?)(?<![\s*])\*(?!\*)", r"\1", text)
@@ -47,7 +52,7 @@ def _attrs() -> str:
 
 
 def markdown_to_note_html(md: str) -> str:
-    """Cowork の記事で使う範囲の Markdown（見出し・段落・太字・箇条書き・引用・区切り線・表）を変換する。"""
+    """Cowork の記事で使う範囲の Markdown（見出し・段落・太字・リンク・箇条書き・引用・区切り線・表）を変換する。"""
     blocks: list[str] = []
     lines = md.replace("\r\n", "\n").split("\n")
     i = 0

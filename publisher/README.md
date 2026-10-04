@@ -100,7 +100,17 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 - どちらかがうまくいかなくても記事そのものは作ります（グラフは同じ数値の箇条書きに置き換え、Summary に ⚠️ で理由を出します）。
 - 作った画像は Actions の実行結果ページの「Artifacts」→ `note-images` からダウンロードして確認できます（30日間）。
 
-## 動作確認
+## 広告枠（アフィリエイト）
+
+`publisher/affiliate.md` に Markdown を書くと、すべての note 記事の末尾にその内容が付き、
+冒頭に「※この記事にはプロモーション（アフィリエイトリンク）を含みます。」が自動で入ります
+（ステマ規制で広告の表記が必要なため、末尾だけ付けることはできないようにしています）。
+
+- 今はコメント（`<!-- -->`）の中に例が入っているだけなので、記事には何も付きません
+- ASP（A8.net・もしもアフィリエイトなど）で発行したリンクを `[表示する文字](URL)` の形で書けば有効になります
+- 外したいときはコメントの外を空にするだけ
+- リンクは note に `nofollow` 付きで入ります。最初は `_drafttest` で下書きを作り、リンクが押せるか確認してください
+
 
 Actions タブ → 「マーケットレポート投稿（note）」→ **Run workflow**（`dry_run` にチェック）で実行すると、
 受け取り用 Gmail の新着を見て、**投稿せずに** note の記事タイトルと文字数を Summary に表示します。
@@ -124,6 +134,7 @@ Secrets を登録したらこれで受け取りまで確認できます（3日�
 | `publisher/thumbnail.py` | タイトル入りの見出し画像を作る |
 | `publisher/charts.py` | 本文の ```chart ブロックをグラフ画像にする |
 | `publisher/xpost.py` | X の文字数計算・分割・OAuth 署名・スレッド投稿（停止中） |
+| `publisher/affiliate.py` / `affiliate.md` | 記事の末尾の広告枠と冒頭の PR 表記 |
 | `publisher/main.py` | 全体の流れと二重投稿防止 |
 | `publish/inbox/` | 受け取った公開版（Gmail から保存したもの） |
 | `publish/done/` | 投稿結果の記録（note の URL など） |

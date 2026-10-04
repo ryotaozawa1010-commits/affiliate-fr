@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from publisher import affiliate
 from publisher import main as main_mod
 from publisher.charts import ChartError, as_text, embed, parse_spec
 from publisher.note import NoteClient, NoteError, markdown_to_note_html
@@ -503,6 +504,61 @@ BAR = {"type": "bar", "title": "セクター別騰落率", "unit": "%", "labels"
 
 def chart_block(spec) -> str:
     return "```chart\n" + json.dumps(spec, ensure_ascii=False) + "\n```"
+
+
+class AffiliateTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.path = Path(self.tmp.name) / "affiliate.md"
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_shipped_file_adds_nothing(self):
+        # リポジトリに置いてある雛形はコメントだけなので、記事は変わらない
+        self.assertEqual(affiliate.apply("本文"), "本文")
+
+    def test_comment_only_or_missing_adds_nothing(self):
+        self.assertEqual(affiliate.apply("本文", self.path), "本文")
+        self.path.write_text("<!--\n- [例](https://example.com)\n-->\n", encoding="utf-8")
+        self.assertEqual(affiliate.apply("本文", self.path), "本文")
+
+    def test_footer_comes_with_disclosure(self):
+        self.path.write_text("<!-- メモ -->\n- [口座を開く](https://px.a8.net/svt/ejp?a8mat=X&b=1)\n", encoding="utf-8")
+        body = affiliate.apply("本文\n", self.path)
+        self.assertTrue(body.startswith(affiliate.DISCLOSURE))
+        self.assertTrue(body.rstrip().endswith("- [口座を開く](https://px.a8.net/svt/ejp?a8mat=X&b=1)"))
+        self.assertNotIn("メモ", body)
+        html_ = markdown_to_note_html(body)
+        self.assertIn('<a href="https://px.a8.net/svt/ejp?a8mat=X&amp;b=1" target="_blank" '
+                      'rel="nofollow noopener noreferrer">口座を開く</a>', html_)
+        self.assertIn("プロモーション", html_)
+
+    def test_link_cannot_break_out_of_attribute(self):
+        html_ = markdown_to_note_html('[x](https://e.com/"onclick=alert(1))')
+        self.assertNotIn('"onclick', html_)
+
+    def test_main_applies_footer(self):
+        from publisher.note import NoteResult
+
+        self.path.write_text("[広告](https://example.com)", encoding="utf-8")
+        cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        try:
+            src = Path("publish/inbox/2026-09-27_weekend.md")
+            src.parent.mkdir(parents=True)
+            src.write_text(FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+            with mock.patch.object(affiliate, "FOOTER", self.path), \
+                    mock.patch.dict(os.environ, {"NOTE_COOKIE": "x"}), \
+                    mock.patch("publisher.main.make_thumbnail", return_value=None), \
+                    mock.patch("publisher.main.NoteClient") as nc:
+                nc.return_value.create.return_value = NoteResult("1", "nabc", "draft", "")
+                self.assertEqual(main_mod.main([str(src)]), 0)
+        finally:
+            os.chdir(cwd)
+        body = nc.return_value.create.call_args[0][1]
+        self.assertTrue(body.startswith(affiliate.DISCLOSURE))
+        self.assertTrue(body.endswith("[広告](https://example.com)\n"))
 
 
 class ThumbnailTest(unittest.TestCase):
