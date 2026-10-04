@@ -35,7 +35,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: pip install -r publisher/requirements.txt
+      - name: 見出し画像・グラフ用の日本語フォントと部品を入れる
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk
+          pip install -r publisher/requirements.txt
 
       - name: Gmail から投稿用メールを受け取る
         id: files
@@ -71,6 +74,15 @@ jobs:
           NOTE_MODE: ${{ vars.NOTE_MODE }}
         run: |
           python -m publisher.main ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: 見出し画像・グラフを保存（Actions の実行結果ページからダウンロードして確認できる）
+        if: always() && steps.files.outputs.files != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: note-images
+          path: publish/media/
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: 受け取ったファイルと投稿結果を記録（二重投稿防止）
         if: always() && steps.files.outputs.files != '' && !inputs.dry_run

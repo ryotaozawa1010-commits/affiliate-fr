@@ -14,8 +14,10 @@ Cowork ルーティン（平日 引け後版 / 日曜 週末版）
 GitHub Actions「マーケットレポート投稿（note）」（10分おきに受け取り用 Gmail を確認）
   │ ③ 差出人が PUBLISH_SENDER で、合言葉（PUBLISH_TOKEN）が一致するメールだけ受け取る
   │ ④ publish/inbox/ に保存
-  │ ⑤ note に記事を作る（下書き or 公開）
-  ▼ ⑥ 結果を publish/done/*.json に記録し、メールに「published」ラベル（二重投稿しない）
+  │ ⑤ タイトル入りの見出し画像（フクロウの TRADING 画像）と、本文中の ```chart から
+  │    出典付きのグラフ画像を作る
+  │ ⑥ note に記事を作る（下書き or 公開）。見出し画像を設定し、グラフを本文に差し込む
+  ▼ ⑦ 結果を publish/done/*.json に記録し、メールに「published」ラベル（二重投稿しない）
 ```
 
 Gmail を「郵便受け」にしているのは、Cowork がもともと Gmail コネクタを持っていて、
@@ -82,6 +84,22 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 
 日本語 140 字を超えるポストは自動で分割してスレッドにつなぎます（X Premium なら Variable `X_PREMIUM` = `true` で分割しない）。
 
+## 見出し画像とグラフ
+
+- **見出し画像**: `publisher/assets/thumbnail_base.jpg`（TRADING のフクロウ）を右に、記事タイトルを
+  「【タグ】・日付・見出し」に分けて左に描いた 1280x670 の画像を毎回作り、note の見出し画像に設定します。
+  手元で試すとき: `python -m publisher.thumbnail "【米国株】2026/10/04 今週の振り返りと週明けの展望" out.png`
+  デザインを変えたいときは `publisher/thumbnail.py`、元の画像を変えたいときは `thumbnail_base.jpg` を差し替えます。
+- **グラフ**: 本文に次の形のブロックがあると、出典付きのグラフ画像にして本文に差し込みます
+  （書き方の詳細は `publisher/charts.py` の先頭と `COWORK_PROMPT.md`）。
+  ````
+  ```chart
+  {"type": "bar", "title": "今週のセクター別騰落率", "unit": "%", "labels": ["情報技術", "ヘルスケア"], "values": [1.80, -2.65], "source": "stockanalysis.com（10/2 終値）"}
+  ```
+  ````
+- どちらかがうまくいかなくても記事そのものは作ります（グラフは同じ数値の箇条書きに置き換え、Summary に ⚠️ で理由を出します）。
+- 作った画像は Actions の実行結果ページの「Artifacts」→ `note-images` からダウンロードして確認できます（30日間）。
+
 ## 動作確認
 
 Actions タブ → 「マーケットレポート投稿（note）」→ **Run workflow**（`dry_run` にチェック）で実行すると、
@@ -102,7 +120,9 @@ Secrets を登録したらこれで受け取りまで確認できます（3日�
 |---|---|
 | `publisher/gmail_inbox.py` | 受け取り用 Gmail から投稿用メールを受け取る（なりすまし検査つき） |
 | `publisher/parse.py` | 公開版 Markdown を note 記事（と X スレッド）に分解 |
-| `publisher/note.py` | Markdown → note 用 HTML 変換、note への下書き保存・公開 |
+| `publisher/note.py` | Markdown → note 用 HTML 変換、note への下書き保存・公開、画像のアップロード |
+| `publisher/thumbnail.py` | タイトル入りの見出し画像を作る |
+| `publisher/charts.py` | 本文の ```chart ブロックをグラフ画像にする |
 | `publisher/xpost.py` | X の文字数計算・分割・OAuth 署名・スレッド投稿（停止中） |
 | `publisher/main.py` | 全体の流れと二重投稿防止 |
 | `publish/inbox/` | 受け取った公開版（Gmail から保存したもの） |
