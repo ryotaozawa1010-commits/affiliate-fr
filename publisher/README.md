@@ -100,11 +100,11 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 - どちらかがうまくいかなくても記事そのものは作ります（グラフは同じ数値の箇条書きに置き換え、Summary に ⚠️ で理由を出します）。
 - 作った画像は Actions の実行結果ページの「Artifacts」→ `note-images` からダウンロードして確認できます（30日間）。
 
-## Substack（フランス語版・週刊）
+## Substack（フランス語版）
 
-日曜の週末版だけ、Cowork が note 記事の後ろにフランス語版（`# ③ Substack記事`）を書き、同じメールで送ってきます。
+平日の引け後版・日曜の週末版とも、Cowork が note 記事の後ろにフランス語版（`# ③ Substack記事`）を書き、同じメールで送ってきます。
 GitHub の仕組みはそれを Substack「Marchés en bref」（https://marchsenbref.substack.com）に投稿します。
-平日版のメールには `# ③` が無いので、Substack には何もしません。
+メールに `# ③` が無ければ、Substack には何もしません。
 
 ### 初期設定（最初の1回だけ）
 
