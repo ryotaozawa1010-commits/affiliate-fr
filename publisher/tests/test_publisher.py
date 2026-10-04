@@ -11,6 +11,7 @@ from publisher import main as main_mod
 from publisher.charts import ChartError, as_text, embed, parse_spec
 from publisher.note import NoteClient, NoteError, markdown_to_note_html
 from publisher.parse import ParseError, parse
+from publisher.substack import SubstackClient, SubstackError, markdown_to_doc
 from publisher.thumbnail import make_thumbnail, split_title, wrap
 from publisher.xpost import (
     XCredentials,
@@ -559,6 +560,202 @@ class AffiliateTest(unittest.TestCase):
         body = nc.return_value.create.call_args[0][1]
         self.assertTrue(body.startswith(affiliate.DISCLOSURE))
         self.assertTrue(body.endswith("[広告](https://example.com)\n"))
+
+
+SUBSTACK_MD = """# ② note記事
+## タイトル
+T
+## 本文
+本文
+# ③ Substack記事
+## タイトル
+**L'indice n'a pas bougé.**
+## サブタイトル
+Bilan de la semaine
+## 本文
+Premier paragraphe.
+
+---
+"""
+
+
+class FakeResponse:
+    def __init__(self, data, status=200):
+        self.status_code = status
+        self.text = json.dumps(data)
+        self.content = self.text.encode()
+        self._data = data
+
+    def json(self):
+        return self._data
+
+
+class FakeSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+        self.headers = {}
+        self.cookies = mock.MagicMock()
+
+    def request(self, method, url, **kw):
+        self.calls.append((method, url, kw))
+        return FakeResponse(*self.responses.pop(0))
+
+
+class SubstackParseTest(unittest.TestCase):
+    def test_substack_section_after_note(self):
+        p = parse(SUBSTACK_MD)
+        self.assertEqual((p.note_title, p.note_body), ("T", "本文"))
+        self.assertEqual(p.substack_title, "L'indice n'a pas bougé.")
+        self.assertEqual(p.substack_subtitle, "Bilan de la semaine")
+        self.assertEqual(p.substack_body, "Premier paragraphe.")
+
+    def test_subtitle_is_optional_and_section_is_optional(self):
+        p = parse(SUBSTACK_MD.replace("## サブタイトル\nBilan de la semaine\n", ""))
+        self.assertEqual((p.substack_title, p.substack_subtitle), ("L'indice n'a pas bougé.", ""))
+        self.assertEqual(parse(FIXTURE.read_text(encoding="utf-8")).substack_title, "")
+
+    def test_empty_substack_body_is_an_error(self):
+        with self.assertRaisesRegex(ParseError, "Substack記事"):
+            parse(SUBSTACK_MD.replace("Premier paragraphe.", ""))
+
+
+class SubstackDocTest(unittest.TestCase):
+    def test_blocks_and_marks(self):
+        doc = markdown_to_doc(
+            "### Le vrai moteur\n\nUn **fort** et *léger* avec [un lien](https://ex.com/a?b=1&c=2).\nLigne 2\n\n"
+            "- un\n- **deux**\n\n1. a\n2. b\n\n> citation\n\n---\n\n"
+            '![Titre (source : X)](https://cdn.substack.com/c.png "620x380")')
+        types = [b["type"] for b in doc["content"]]
+        self.assertEqual(types, ["heading", "paragraph", "bullet_list", "ordered_list", "blockquote",
+                                 "horizontal_rule", "captionedImage"])
+        self.assertEqual(doc["content"][0]["attrs"], {"level": 2})
+        para = doc["content"][1]["content"]
+        self.assertIn({"type": "text", "text": "fort", "marks": [{"type": "strong"}]}, para)
+        self.assertIn({"type": "text", "text": "léger", "marks": [{"type": "em"}]}, para)
+        self.assertIn({"type": "text", "text": "un lien",
+                       "marks": [{"type": "link", "attrs": {"href": "https://ex.com/a?b=1&c=2"}}]}, para)
+        self.assertIn({"type": "hard_break"}, para)
+        item = doc["content"][2]["content"][1]
+        self.assertEqual(item["content"][0]["content"], [{"type": "text", "text": "deux", "marks": [{"type": "strong"}]}])
+        image, caption = doc["content"][6]["content"]
+        self.assertEqual((image["attrs"]["src"], image["attrs"]["width"], image["attrs"]["height"]),
+                         ("https://cdn.substack.com/c.png", 620, 380))
+        self.assertEqual(caption["content"][0]["text"], "Titre (source : X)")
+
+    def test_bold_link(self):
+        nodes = markdown_to_doc("**[Ouvrir](https://x.io/1)**")["content"][0]["content"]
+        self.assertEqual(nodes, [{"type": "text", "text": "Ouvrir",
+                                  "marks": [{"type": "strong"}, {"type": "link", "attrs": {"href": "https://x.io/1"}}]}])
+
+
+class SubstackClientTest(unittest.TestCase):
+    def test_publish_flow(self):
+        fake = FakeSession([({"id": 7}, 200), ({"id": 99}, 201), ({}, 200),
+                            ({"slug": "lindice", "canonical_url": "https://pub.substack.com/p/lindice"}, 200)])
+        r = SubstackClient("pub", "a=b; substack.sid=s%3Axyz; c=d", session=fake).create(
+            "Titre", "Sous-titre", "Corps **gras**", publish=True)
+        self.assertEqual((r.draft_id, r.status, r.url), (99, "published", "https://pub.substack.com/p/lindice"))
+        fake.cookies.set.assert_called_once_with("substack.sid", "s%3Axyz", domain=".substack.com")
+        urls = [(m, u) for m, u, _ in fake.calls]
+        self.assertEqual(urls, [("GET", "https://substack.com/api/v1/user/profile/self"),
+                                ("POST", "https://pub.substack.com/api/v1/drafts"),
+                                ("GET", "https://pub.substack.com/api/v1/drafts/99/prepublish"),
+                                ("POST", "https://pub.substack.com/api/v1/drafts/99/publish")])
+        body = fake.calls[1][2]["json"]
+        self.assertEqual((body["draft_title"], body["draft_subtitle"], body["audience"]),
+                         ("Titre", "Sous-titre", "everyone"))
+        self.assertEqual(body["draft_bylines"], [{"id": 7, "is_guest": False}])
+        self.assertEqual(json.loads(body["draft_body"])["type"], "doc")
+        self.assertEqual(fake.calls[3][2]["json"], {"send": True, "share_automatically": False})
+
+    def test_draft_only(self):
+        fake = FakeSession([({"id": 7}, 200), ({"id": 99}, 201)])
+        r = SubstackClient("pub", "sid", session=fake).create("T", "", "Corps", publish=False)
+        self.assertEqual((r.status, r.url, len(fake.calls)), ("draft", None, 2))
+
+    def test_publish_failure_keeps_draft(self):
+        fake = FakeSession([({"id": 7}, 200), ({"id": 99}, 201), ({}, 200), ({"error": "x"}, 500)])
+        r = SubstackClient("pub", "sid", session=fake).create("T", "", "Corps", publish=True)
+        self.assertEqual(r.status, "draft")
+        self.assertIn("公開できませんでした", r.warnings[0])
+
+    def test_expired_cookie(self):
+        fake = FakeSession([({"error": "Not authorized"}, 401)])
+        with self.assertRaisesRegex(SubstackError, "Cookie"):
+            SubstackClient("pub", "sid", session=fake).create("T", "", "Corps", publish=False)
+
+    def test_image_upload(self):
+        fake = FakeSession([({"url": "https://substack-post-media.s3.amazonaws.com/x.png"}, 200)])
+        with tempfile.TemporaryDirectory() as d:
+            img = Path(d) / "c.png"
+            img.write_bytes(b"\x89PNG")
+            url = SubstackClient("pub", "sid", session=fake).upload_image(img)
+        self.assertEqual(url, "https://substack-post-media.s3.amazonaws.com/x.png")
+        self.assertEqual(fake.calls[0][2]["data"], {"image": "data:image/png;base64,iVBORw=="})
+
+
+class SubstackMainTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        self.file = Path("publish/inbox/2026-10-11_weekend.md")
+        self.file.parent.mkdir(parents=True)
+        self.file.write_text(SUBSTACK_MD.replace("Premier paragraphe.", "Premier paragraphe.\n\n" + chart_block(
+            {**BAR, "title": "Performance sectorielle", "source": "stockanalysis.com"})), encoding="utf-8")
+
+    def tearDown(self):
+        os.chdir(self.cwd)
+        self.tmp.cleanup()
+
+    def test_live_run_posts_to_substack_once(self):
+        from publisher.note import NoteResult
+        from publisher.substack import SubstackResult
+
+        env = {"NOTE_COOKIE": "x", "SUBSTACK_COOKIE": "sid", "SUBSTACK_PUBLICATION": "pub",
+               "SUBSTACK_MODE": "publish"}
+        with mock.patch.dict(os.environ, env), \
+                mock.patch("publisher.main.make_thumbnail", return_value=None), \
+                mock.patch("publisher.main.NoteClient") as nc, \
+                mock.patch("publisher.main.SubstackClient") as sc:
+            nc.return_value.create.return_value = NoteResult("1", "nabc", "draft", None)
+            sc.return_value.upload_image.return_value = "https://cdn/x.png"
+            sc.return_value.create.return_value = SubstackResult(99, "published", "https://pub.substack.com/p/x")
+            self.assertEqual(main_mod.main([str(self.file)]), 0)
+            self.assertEqual(main_mod.main([str(self.file)]), 0)
+        sc.assert_called_once_with("pub", "sid")
+        self.assertEqual(sc.return_value.create.call_count, 1)
+        title, subtitle, body = sc.return_value.create.call_args[0]
+        self.assertEqual((title, subtitle), ("L'indice n'a pas bougé.", "Bilan de la semaine"))
+        self.assertIn("(source : stockanalysis.com)](https://cdn/x.png", body)
+        self.assertTrue(sc.return_value.create.call_args[1]["publish"])
+        saved = json.loads(Path("publish/done/2026-10-11_weekend.json").read_text())
+        self.assertEqual(saved["substack"]["url"], "https://pub.substack.com/p/x")
+
+    def test_drafttest_never_publishes_and_missing_settings_skip(self):
+        drafttest = self.file.with_name("2026-10-11_drafttest.md")
+        self.file.rename(drafttest)
+        env = {"SUBSTACK_COOKIE": "sid", "SUBSTACK_PUBLICATION": "pub", "SUBSTACK_MODE": "publish"}
+        with mock.patch.dict(os.environ, env), mock.patch("publisher.main.SubstackClient") as sc:
+            from publisher.substack import SubstackResult
+            sc.return_value.create.return_value = SubstackResult(99, "draft", None)
+            main_mod.main([str(drafttest)])
+        self.assertFalse(sc.return_value.create.call_args[1]["publish"])
+        with mock.patch.dict(os.environ, {"SUBSTACK_PUBLICATION": "pub"}, clear=True), \
+                mock.patch("publisher.main.SubstackClient") as sc2:
+            main_mod.main([str(drafttest), "--dry-run"])
+            main_mod.main([str(self.file.with_name("missing.md"))])
+        sc2.assert_not_called()
+
+    def test_french_affiliate_block(self):
+        footer = Path(self.tmp.name) / "affiliate_fr.md"
+        footer.write_text("- [Ouvrir un compte](https://tr.example/1)", encoding="utf-8")
+        with mock.patch.object(affiliate, "FOOTER_FR", footer):
+            body = affiliate.apply_fr("Corps")
+        self.assertTrue(body.startswith("*Publicité"))
+        self.assertTrue(body.rstrip().endswith("(https://tr.example/1)"))
+        self.assertEqual(affiliate.apply_fr("Corps"), "Corps")  # 同梱の雛形はコメントだけ
 
 
 class ThumbnailTest(unittest.TestCase):

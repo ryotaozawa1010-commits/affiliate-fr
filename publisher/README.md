@@ -100,6 +100,34 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 - どちらかがうまくいかなくても記事そのものは作ります（グラフは同じ数値の箇条書きに置き換え、Summary に ⚠️ で理由を出します）。
 - 作った画像は Actions の実行結果ページの「Artifacts」→ `note-images` からダウンロードして確認できます（30日間）。
 
+## Substack（フランス語版・週刊）
+
+日曜の週末版だけ、Cowork が note 記事の後ろにフランス語版（`# ③ Substack記事`）を書き、同じメールで送ってきます。
+GitHub の仕組みはそれを Substack「Marchés en bref」（https://marchsenbref.substack.com）に投稿します。
+平日版のメールには `# ③` が無いので、Substack には何もしません。
+
+### 初期設定（最初の1回だけ）
+
+1. **Substack の入館証（Cookie）を取る**（PC の Chrome で）
+   1. https://marchsenbref.substack.com を開き、ログインした状態にする
+   2. 開発者ツール（F12）→ **Application** → 左の **Cookies** → `https://substack.com`（無ければ `https://marchsenbref.substack.com`）
+   3. 名前が `substack.sid` の行の **Value** をコピー
+2. https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/secrets/actions/new で Secret `SUBSTACK_COOKIE` に貼る
+3. 最初の1回は下書きで届くので、Substack で見た目を確認する。問題なければ
+   https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/actions/new で Variable `SUBSTACK_MODE` = `publish` を追加。
+   以後は毎週そのまま公開され、購読者にメールが届きます
+
+| Name | 種類 | 動き |
+|---|---|---|
+| `SUBSTACK_COOKIE` | Secret | ログイン用（必須）。切れたら同じ手順で取り直す |
+| `SUBSTACK_MODE` | Variable | 未設定 / `draft`: 下書き。`publish`: そのまま公開してメール配信 |
+| `SUBSTACK_PUBLICATION` | Variable | サブドメイン。未設定なら `marchsenbref` |
+| `SUBSTACK_EMAIL` / `SUBSTACK_PASSWORD` | Secret | Cookie の代わり。Google で登録したアカウントにはパスワードが無いので通常は使わない |
+
+- グラフは note と同じ ```chart から作り、出典は「Source : …」とフランス語で入ります
+- Substack にも公式の投稿 API はなく、エディタと同じ通信を再現しています。仕様変更で突然動かなくなることがあります（失敗すると GitHub からメールが届きます）
+- 公開に失敗しても下書きは残るので、Substack のアプリから手で公開できます
+
 ## 広告枠（アフィリエイト）
 
 `publisher/affiliate.md` に Markdown を書くと、すべての note 記事の末尾にその内容が付き、
@@ -109,6 +137,8 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 - 今はコメント（`<!-- -->`）の中に例が入っているだけなので、記事には何も付きません
 - ASP（A8.net・もしもアフィリエイトなど）で発行したリンクを `[表示する文字](URL)` の形で書けば有効になります
 - 外したいときはコメントの外を空にするだけ
+- Substack（フランス語版）には `publisher/affiliate_fr.md` が同じように付き、冒頭には「Publicité : …」が入ります
+  （フランスのインフルエンサー法で広告の明示が必要なため）。Trade Republic の紹介リンクが届いたらここに書きます
 - リンクは note に `nofollow` 付きで入ります。最初は `_drafttest` で下書きを作り、リンクが押せるか確認してください
 
 
@@ -129,12 +159,13 @@ Secrets を登録したらこれで受け取りまで確認できます（3日�
 | パス | 役割 |
 |---|---|
 | `publisher/gmail_inbox.py` | 受け取り用 Gmail から投稿用メールを受け取る（なりすまし検査つき） |
-| `publisher/parse.py` | 公開版 Markdown を note 記事（と X スレッド）に分解 |
+| `publisher/parse.py` | 公開版 Markdown を note 記事・Substack 記事（と X スレッド）に分解 |
 | `publisher/note.py` | Markdown → note 用 HTML 変換、note への下書き保存・公開、画像のアップロード |
 | `publisher/thumbnail.py` | タイトル入りの見出し画像を作る |
 | `publisher/charts.py` | 本文の ```chart ブロックをグラフ画像にする |
 | `publisher/xpost.py` | X の文字数計算・分割・OAuth 署名・スレッド投稿（停止中） |
-| `publisher/affiliate.py` / `affiliate.md` | 記事の末尾の広告枠と冒頭の PR 表記 |
+| `publisher/affiliate.py` / `affiliate.md` / `affiliate_fr.md` | 記事の末尾の広告枠と冒頭の PR 表記（日本語 / フランス語） |
+| `publisher/substack.py` | Markdown → Substack の文書形式への変換、Substack への下書き保存・公開、画像のアップロード |
 | `publisher/main.py` | 全体の流れと二重投稿防止 |
 | `publish/inbox/` | 受け取った公開版（Gmail から保存したもの） |
 | `publish/done/` | 投稿結果の記録（note の URL など） |
