@@ -15,8 +15,10 @@ import html
 import json
 import re
 import subprocess
+import urllib.parse
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
 
 BASE = "https://note.com"
 USER_AGENT = (
@@ -34,6 +36,9 @@ def _inline(text: str) -> str:
     # note のエディタに斜体はないので記号だけ外す
     text = re.sub(r"(?<!\*)\*(?![\s*])(.+?)(?<![\s*])\*(?!\*)", r"\1", text)
     return text
+
+
+IMAGE = re.compile(r'^!\[([^\]]*)\]\((https://\S+?)(?:\s+"(\d+)x(\d+)")?\)$')
 
 
 def _attrs() -> str:
@@ -54,6 +59,18 @@ def markdown_to_note_html(md: str) -> str:
             continue
         if re.match(r"^-{3,}$|^\*{3,}$", stripped):
             blocks.append(f"<hr{_attrs()}>")
+            i += 1
+            continue
+        m = IMAGE.match(stripped)
+        if m:
+            # グラフ等の画像（アップロード済みの URL）。下の説明文に出典を載せる
+            caption, src = html.escape(m.group(1)), html.escape(m.group(2))
+            width, height = (m.group(3), m.group(4)) if m.group(3) else ("620", "auto")
+            uid = str(uuid.uuid4())
+            blocks.append(
+                f'<figure name="{uid}" id="{uid}"><img src="{src}" alt="" width="{width}" height="{height}" '
+                f'contenteditable="false" draggable="false"><figcaption>{caption}</figcaption></figure>'
+            )
             i += 1
             continue
         m = re.match(r"^(#{1,6})\s+(.*)$", stripped)
@@ -105,6 +122,7 @@ def _starts_block(line: str) -> bool:
     s = line.strip()
     return bool(
         re.match(r"^(#{1,6}\s|[-*・]\s|\d+[.)]\s|>|\|)", s) or re.match(r"^-{3,}$|^\*{3,}$", s)
+        or IMAGE.match(s)
     )
 
 
@@ -121,6 +139,8 @@ class NoteResult:
     key: str
     status: str  # "draft" | "published"
     url: str | None  # 公開した場合のみ
+    eyecatch: str | None = None  # 見出し画像の URL（付けられた場合）
+    warnings: list[str] = field(default_factory=list)  # 記事は作れたが一部うまくいかなかったこと
 
 
 def _xsrf_from_cookie(cookie: str) -> str | None:
@@ -171,6 +191,54 @@ def _curl(run, method: str, path: str, body: dict | None, *, cookie: str | None,
             head += parts.pop(0) + "\n"
         out = "\n\n".join(parts)
     return (int(code) if code.isdigit() else 0), head, out
+
+
+IMAGE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif"}
+
+
+def _curl_form(run, url: str, fields: dict[str, str], file: tuple[str, Path] | None, *,
+               cookie: str | None = None, xsrf: str | None = None) -> tuple[int, str]:
+    """multipart/form-data で送る（画像のアップロード用）。cookie が None なら note 以外（S3）宛て。
+
+    Content-Type は境界（boundary）付きで curl に付けさせる。ファイルは最後に置く（S3 の決まり）。
+    """
+    cmd = ["curl", "-sS", "-X", "POST", url, "-w", "\n%{http_code}"]
+    if cookie is not None:
+        cmd.insert(2, "--compressed")
+        for h in (
+            f"User-Agent: {USER_AGENT}",
+            "Accept: application/json, text/plain, */*",
+            "Accept-Language: ja,en-US;q=0.9,en;q=0.8",
+            "Origin: https://editor.note.com",
+            "Referer: https://editor.note.com/",
+            "X-Requested-With: XMLHttpRequest",
+            f"Cookie: {cookie}",
+        ) + ((f"X-XSRF-TOKEN: {xsrf}",) if xsrf else ()):
+            cmd += ["-H", h]
+    for k, v in fields.items():
+        # --form-string は値の先頭が @ や < でもファイル扱いしない
+        cmd += ["--form-string", f"{k}={v}"]
+    if file:
+        name, path = file
+        mime = IMAGE_TYPES.get(path.suffix.lower())
+        if not mime:
+            raise NoteError(f"画像の形式が未対応です: {path.name}")
+        cmd += ["-F", f'{name}=@"{path}";type={mime};filename={path.name}']
+    proc = run(cmd, capture_output=True, text=True, timeout=120)
+    if proc.returncode != 0:
+        raise NoteError(f"curl が失敗しました: {proc.stderr.strip()[:300]}")
+    out, _, code = proc.stdout.rpartition("\n")
+    return (int(code) if code.isdigit() else 0), out
+
+
+def _image_size(path: Path) -> tuple[int, int]:
+    try:
+        from PIL import Image
+
+        with Image.open(path) as im:
+            return im.size
+    except Exception:  # noqa: BLE001  寸法は無くても送れる
+        return 0, 0
 
 
 def _shape(text: str) -> str:
@@ -271,7 +339,55 @@ class NoteClient:
             return f"問い合わせ失敗 {e}"
         return f"HTTP {code} {_shape(text)}"
 
-    def create(self, title: str, body_md: str, *, publish: bool) -> NoteResult:
+    def _xsrf(self) -> str | None:
+        """画像アップロードに添える XSRF トークン。Cookie に無ければ note に発行してもらう。"""
+        if getattr(self, "_xsrf_token", None) is None:
+            token = _xsrf_from_cookie(self.cookie)
+            if not token:
+                try:
+                    _, head, _ = _curl(self._run, "GET", "/api/v2/current_user", None, cookie=self.cookie,
+                                       dump_headers=True)
+                    m = re.search(r"(?im)^set-cookie:\s*XSRF-TOKEN=([^;\r\n]+)", head)
+                    token = m.group(1) if m else ""
+                except NoteError:
+                    token = ""
+            self._xsrf_token = urllib.parse.unquote(token)
+        return self._xsrf_token or None
+
+    def _upload(self, path: str, fields: dict[str, str], file: Path | None) -> dict:
+        code, text = _curl_form(self._run, f"{BASE}{path}", fields, ("file", file) if file else None,
+                                cookie=self.cookie, xsrf=self._xsrf())
+        if not 200 <= code < 300:
+            raise NoteError(f"POST {path} が HTTP {code} で失敗しました: {_shape(text)}")
+        try:
+            return json.loads(text).get("data") or {}
+        except (json.JSONDecodeError, AttributeError) as e:
+            raise NoteError(f"POST {path} の応答が JSON ではありません: {_shape(text)}") from e
+
+    def upload_eyecatch(self, note_id: str, image: Path) -> str:
+        """記事の見出し画像を設定する（1280x670 推奨）。送るだけで記事に紐づく。"""
+        width, height = _image_size(image)
+        fields = {"note_id": str(note_id)}
+        if width and height:
+            fields.update(width=str(width), height=str(height))
+        data = self._upload("/api/v1/image_upload/note_eyecatch", fields, image)
+        url = data.get("url") or data.get("eyecatch") or data.get("eyecatch_url") or ""
+        if not url:
+            raise NoteError(f"見出し画像の URL が返ってきませんでした: keys={sorted(data)}")
+        return url
+
+    def upload_body_image(self, image: Path) -> str:
+        """本文に貼る画像を note の保管場所（S3）に置き、表示用の URL を返す。"""
+        data = self._upload("/api/v3/images/upload/presigned_post", {"filename": image.name}, None)
+        action, url, post = data.get("action"), data.get("url"), data.get("post")
+        if not (str(action).startswith("https://") and url and isinstance(post, dict)):
+            raise NoteError(f"画像の置き場所を受け取れませんでした: keys={sorted(data)}")
+        code, text = _curl_form(self._run, action, {k: str(v) for k, v in post.items() if v not in (None, "")}, ("file", image))
+        if not 200 <= code < 300:
+            raise NoteError(f"画像のアップロードが HTTP {code} で失敗しました: {text[:200]}")
+        return url
+
+    def create(self, title: str, body_md: str, *, publish: bool, eyecatch: Path | None = None) -> NoteResult:
         body_html = markdown_to_note_html(body_md)
         body_length = len(re.sub(r"<[^>]+>", "", body_html))
 
@@ -293,8 +409,15 @@ class NoteClient:
             f"/api/v1/text_notes/draft_save?id={note_id}&is_temp_saved=true",
             {"body": body_html, "body_length": body_length, "name": title, "index": False, "is_lead_form": False},
         )
+        eyecatch_url, warnings = None, []
+        if eyecatch:
+            # 見出し画像が付けられなくても記事そのものは残す
+            try:
+                eyecatch_url = self.upload_eyecatch(note_id, eyecatch)
+            except NoteError as e:
+                warnings.append(f"見出し画像を付けられませんでした（{e}）")
         if not publish:
-            return NoteResult(note_id, key, "draft", None)
+            return NoteResult(note_id, key, "draft", None, eyecatch_url, warnings)
 
         self._request(
             "PUT",
@@ -326,4 +449,4 @@ class NoteClient:
             },
         )
         url = f"{BASE}/{urlname}/n/{key}" if urlname else f"{BASE}/n/{key}"
-        return NoteResult(note_id, key, "published", url)
+        return NoteResult(note_id, key, "published", url, eyecatch_url, warnings)

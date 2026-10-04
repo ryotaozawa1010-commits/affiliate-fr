@@ -28,6 +28,7 @@ import html
 import imaplib
 import json
 import os
+import quopri
 import re
 import sys
 import textwrap
@@ -47,10 +48,49 @@ class Rejected(ValueError):
     pass
 
 
+def _unflow(part: Message) -> str:
+    """format=flowed（RFC 3676）の本文を元の行に戻す。
+
+    Gmail は長い行を「行末に空白を残して改行」する形で折り返して届ける。素直に読むと
+    折り返し位置に本物の改行が入り、文の途中で改行された記事になってしまう。
+    quoted-printable では行末の空白がデコード時に消えるため、デコード前につなぎ直す。
+    """
+    delsp = str(part.get_param("delsp", "no")).lower() == "yes"
+    join = "" if delsp else " "
+    if str(part.get("Content-Transfer-Encoding", "")).strip().lower() == "quoted-printable":
+        encoded = str(part.get_payload(decode=False))
+        encoded = re.sub(r"(?: |=20)\r?\n", join, encoded)
+        text = quopri.decodestring(encoded.encode("ascii", "replace")).decode(
+            part.get_content_charset() or "utf-8", "replace")
+    else:
+        text = re.sub(r" \r?\n", join, part.get_content())
+    # 行頭の空白・「>」・「From 」の前に足された 1 文字（space-stuffing）を外す
+    return re.sub(r"(?m)^ ", "", text.replace("\r\n", "\n"))
+
+
+def _structure(raw: bytes) -> str:
+    """原因調査用に、本文の中身を出さずにメールの形（符号化・折り返し方）だけを要約する。"""
+    msg = email.message_from_bytes(raw, policy=email.policy.default)
+    out = []
+    for part in msg.walk():
+        if part.is_multipart():
+            continue
+        lines = str(part.get_payload(decode=False)).split("\n")
+        out.append(
+            f"{part.get_content_type()} format={part.get_param('format', '-')} "
+            f"delsp={part.get_param('delsp', '-')} cte={part.get('Content-Transfer-Encoding', '-')} "
+            f"行数={len(lines)} 最長={max(map(len, lines))} 行末空白={sum(l.rstrip(chr(13)).endswith(' ') for l in lines)} "
+            f"行末=20={sum(l.rstrip(chr(13)).endswith('=20') for l in lines)}"
+        )
+    return " / ".join(out)
+
+
 def _plain_text(msg: Message) -> str:
     parts = [p for p in msg.walk() if not p.is_multipart() and not p.get_filename()]
     for part in parts:
         if part.get_content_type() == "text/plain":
+            if str(part.get_param("format", "")).lower() == "flowed":
+                return _unflow(part)
             return part.get_content()
     for part in parts:
         if part.get_content_type() == "text/html":
@@ -108,6 +148,7 @@ def fetch() -> list[str]:
             print(f"スキップ（UID {uid.decode()}）: {e}", file=sys.stderr)
             continue
         fetched.append(uid.decode())
+        print(f"受け取り（UID {uid.decode()}）: {_structure(raw)}", file=sys.stderr)
         path = INBOX_DIR / f"{stem}.md"
         if path.exists():
             print(f"既に受け取り済み: {path}", file=sys.stderr)

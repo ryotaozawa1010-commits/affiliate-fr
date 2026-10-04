@@ -21,11 +21,14 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from publisher.charts import embed
 from publisher.note import NoteClient, NoteError
 from publisher.parse import ParseError, parse
+from publisher.thumbnail import make_thumbnail
 from publisher.xpost import XCredentials, XPostError, build_thread, post_thread, weighted_length
 
 DONE_DIR = Path("publish/done")
+MEDIA_DIR = Path("publish/media")  # 見出し画像・グラフ画像の控え
 
 
 def _env(name: str) -> str:
@@ -43,6 +46,16 @@ def _note_client() -> NoteClient:
     if _env("NOTE_COOKIE"):
         return NoteClient(_env("NOTE_COOKIE"), urlname)
     return NoteClient.login(_env("NOTE_EMAIL"), _env("NOTE_PASSWORD"), urlname)
+
+
+def _thumbnail(title: str, stem: str, out: list[str]) -> Path | None:
+    """記事タイトル入りの見出し画像を作る。作れなくても記事は出すので None を返すだけにする。"""
+    kind = "WEEKLY REVIEW" if stem.endswith("_weekend") else "MARKET CLOSE" if stem.endswith("_weekday") else ""
+    try:
+        return make_thumbnail(title, MEDIA_DIR / stem / "eyecatch.png", kind=kind)
+    except Exception as e:  # noqa: BLE001
+        out.append(f"⚠️ 見出し画像を作れませんでした（{e}）")
+        return None
 
 
 def _summary(lines: list[str]) -> None:
@@ -86,18 +99,28 @@ def process(path: Path, *, dry_run: bool) -> bool:
         if result.get("note"):
             out.append(f"note: 処理済みのためスキップ（{result['note']['status']}）")
         elif dry_run:
+            eyecatch = _thumbnail(payload.note_title, path.stem, out)
+            charts = embed(payload.note_body, MEDIA_DIR / path.stem, None)
             out.append(f"note（プレビュー）: 「{payload.note_title}」 本文 {len(payload.note_body)} 字 / "
                        f"{'公開' if publish_note else '下書き'}予定")
+            if eyecatch:
+                out.append(f"見出し画像を作成（{eyecatch}）")
+            out += charts.notes + [f"⚠️ {w}" for w in charts.warnings]
         elif not (_env("NOTE_EMAIL") and _env("NOTE_PASSWORD")) and not _env("NOTE_COOKIE"):
             out.append("note: NOTE_COOKIE（または NOTE_EMAIL / NOTE_PASSWORD）が未設定のためスキップ")
         else:
             try:
-                r = _note_client().create(
-                    payload.note_title, payload.note_body, publish=publish_note
-                )
-                result["note"] = {"id": r.note_id, "key": r.key, "status": r.status, "url": r.url}
+                client = _note_client()
+                eyecatch = _thumbnail(payload.note_title, path.stem, out)
+                charts = embed(payload.note_body, MEDIA_DIR / path.stem, client.upload_body_image)
+                r = client.create(payload.note_title, charts.body, publish=publish_note, eyecatch=eyecatch)
+                result["note"] = {"id": r.note_id, "key": r.key, "status": r.status, "url": r.url,
+                                  "eyecatch": bool(r.eyecatch), "charts": len(charts.notes)}
                 note_url = r.url
                 out.append(f"✅ note: {'公開しました ' + r.url if r.url else '下書きに保存しました（note アプリで公開してください）'}")
+                if r.eyecatch:
+                    out.append("見出し画像: 設定しました")
+                out += charts.notes + [f"⚠️ {w}" for w in charts.warnings + r.warnings]
             except NoteError as e:
                 ok = False
                 out.append(f"❌ note: {e}")

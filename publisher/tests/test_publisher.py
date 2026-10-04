@@ -7,8 +7,10 @@ from pathlib import Path
 from unittest import mock
 
 from publisher import main as main_mod
+from publisher.charts import ChartError, as_text, embed, parse_spec
 from publisher.note import NoteClient, NoteError, markdown_to_note_html
 from publisher.parse import ParseError, parse
+from publisher.thumbnail import make_thumbnail, split_title, wrap
 from publisher.xpost import (
     XCredentials,
     XPostError,
@@ -331,7 +333,7 @@ class MainTest(unittest.TestCase):
             nc.login.return_value.create.return_value = NoteResult("1", "nabc", "draft", None)
             self.assertEqual(main_mod.main([str(f)]), 0)
         pt.assert_not_called()
-        self.assertEqual(nc.login.return_value.create.call_args.kwargs, {"publish": False})
+        self.assertIs(nc.login.return_value.create.call_args.kwargs["publish"], False)
 
     def test_cookie_is_preferred_over_password(self):
         from publisher.note import NoteResult
@@ -442,6 +444,23 @@ class GmailExtractTest(unittest.TestCase):
         self.assertEqual(build_thread(p.x_posts), ["受け渡しテストです📉 太字も入れておきます。", "これは2本目。#テスト"])
         self.assertEqual(p.note_title, "【テスト】受け渡し確認")
 
+    def test_flowed_soft_breaks_are_joined(self):
+        # Gmail は長い行を「行末に空白を残して改行」する format=flowed で届ける（2026-10-04 の週末版で発生）
+        import quopri as qp
+
+        text = ("TOKEN: secret-token\n-----BEGIN-----\n# ② note記事\n## タイトル\nT\n## 本文\n"
+                "ところが中を開けると、情報技術が \n+1.80%、ヘルスケアが \n−2.65%。\n\n"
+                '```chart\n{"title": "騰落率", \n"source": "S&P"}\n```\n-----END-----\n')
+        encoded = qp.encodestring(text.replace("\n", "\r\n").encode()).decode()
+        # 行末の空白は literal でも =20 でも来うる
+        encoded = encoded.replace("=E3=81=8C=20\r\n", "=E3=81=8C \r\n", 1)
+        raw = ("Subject: [PUBLISH] 2026-10-04_weekend\r\nFrom: me@gmail.com\r\nMIME-Version: 1.0\r\n"
+               "Content-Type: text/plain; charset=UTF-8; format=flowed\r\n"
+               "Content-Transfer-Encoding: quoted-printable\r\n\r\n" + encoded).encode()
+        _, content = self.extract(raw)
+        self.assertIn("情報技術が +1.80%、ヘルスケアが −2.65%。\n", content)
+        self.assertIn('{"title": "騰落率", "source": "S&P"}', content)
+
     def test_indented_body(self):
         content = FIXTURE.read_text(encoding="utf-8")
         indented = "\n".join("    " + l if l else l for l in content.split("\n"))
@@ -452,6 +471,176 @@ class GmailExtractTest(unittest.TestCase):
     def test_html_only_mail(self):
         stem, content = self.extract(self.mail(html=True))
         self.assertEqual(len(parse(content).x_posts), 5)
+
+
+BAR = {"type": "bar", "title": "セクター別騰落率", "unit": "%", "labels": ["情報技術", "ヘルスケア"],
+       "values": [1.8, -2.65], "source": "S&P Dow Jones Indices"}
+
+
+def chart_block(spec) -> str:
+    return "```chart\n" + json.dumps(spec, ensure_ascii=False) + "\n```"
+
+
+class ThumbnailTest(unittest.TestCase):
+    def test_split_title(self):
+        self.assertEqual(split_title("【米国株】2026/10/04 今週の振り返りと週明けの展望"),
+                         ("米国株", "2026/10/04", "今週の振り返りと週明けの展望"))
+        self.assertEqual(split_title("ただの題名"), ("", "", "ただの題名"))
+
+    def test_wrap_keeps_text_and_avoids_punctuation_at_line_start(self):
+        from PIL import ImageFont
+        from publisher.thumbnail import find_font
+
+        font = ImageFont.truetype(find_font()[0], 72, index=find_font()[1])
+        text = "雇用統計ショックで金利急騰、ハイテク株に試練の一日"
+        lines = wrap(text, font, 600)
+        self.assertEqual("".join(lines), text)
+        self.assertTrue(all(font.getlength(l) <= 600 for l in lines))
+        self.assertFalse(any(l[0] in "、。" for l in lines))
+
+    def test_make_thumbnail_size(self):
+        from PIL import Image
+
+        with tempfile.TemporaryDirectory() as d:
+            out = make_thumbnail("【米国株】2026/10/04 今週の振り返りと週明けの展望", Path(d) / "e.png")
+            with Image.open(out) as im:
+                self.assertEqual(im.size, (1280, 670))
+
+
+class ChartTest(unittest.TestCase):
+    def test_parse_spec_validates(self):
+        self.assertEqual(parse_spec(json.dumps(BAR)).labels, ["情報技術", "ヘルスケア"])
+        for broken, msg in (({**BAR, "source": ""}, "出典"), ({**BAR, "values": [1]}, "数が合いません"),
+                            ({**BAR, "type": "pie"}, "type"), ({**BAR, "values": ["x", 1]}, "数値")):
+            with self.assertRaisesRegex(ChartError, msg):
+                parse_spec(json.dumps(broken))
+        with self.assertRaisesRegex(ChartError, "JSON"):
+            parse_spec("{")
+
+    def test_text_fallback_keeps_numbers_and_source(self):
+        text = as_text(parse_spec(json.dumps(BAR)))
+        self.assertIn("- 情報技術: +1.8%", text)
+        self.assertIn("- ヘルスケア: -2.65%", text)
+        self.assertIn("出典: S&P Dow Jones Indices", text)
+
+    def test_embed_uploads_and_inserts_image(self):
+        body = "前置き\n\n" + chart_block(BAR) + "\n\n続き\n\n" + chart_block(
+            {"type": "line", "title": "米10年債利回り", "unit": "%", "labels": ["10/1", "10/2"],
+             "series": [{"name": "米10年", "values": [3.9, 4.0]}], "source": "米財務省"})
+        uploaded = []
+        with tempfile.TemporaryDirectory() as d:
+            rep = embed(body, Path(d), lambda p: uploaded.append(p) or f"https://assets.st-note.com/{p.name}")
+            self.assertTrue(all(p.exists() for p in uploaded))
+        self.assertEqual([p.name for p in uploaded], ["chart_1.png", "chart_2.png"])
+        self.assertIn('![セクター別騰落率（出典: S&P Dow Jones Indices）](https://assets.st-note.com/chart_1.png '
+                      '"620x380")', rep.body)
+        self.assertNotIn("```", rep.body)
+        self.assertEqual(rep.warnings, [])
+        html_out = markdown_to_note_html(rep.body)
+        self.assertRegex(html_out, r'<figure name="[^"]+" id="[^"]+"><img src="https://assets.st-note.com/chart_1.png"'
+                                   r' alt="" width="620" height="380"[^>]*><figcaption>セクター別騰落率'
+                                   r'（出典: S&amp;P Dow Jones Indices）</figcaption></figure>')
+
+    def test_embed_falls_back_to_text(self):
+        def fail(_):
+            raise NoteError("HTTP 500")
+
+        with tempfile.TemporaryDirectory() as d:
+            rep = embed("a\n\n" + chart_block(BAR) + "\n\n" + chart_block({"title": "x"}), Path(d), fail)
+            preview = embed(chart_block(BAR), Path(d), None)
+            self.assertTrue((Path(d) / "chart_1.png").exists())
+        self.assertIn("出典: S&P Dow Jones Indices", rep.body)
+        self.assertNotIn("```", rep.body)
+        self.assertEqual(len(rep.warnings), 2)
+        self.assertIn("アップロードに失敗", rep.warnings[0])
+        self.assertIn("書式が正しくない", rep.warnings[1])
+        self.assertIn("- 情報技術: +1.8%", preview.body)
+
+
+class NoteImageTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.img = make_thumbnail("【米国株】2026/10/04 テスト", Path(self.tmp.name) / "eyecatch.png")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_draft_with_eyecatch(self):
+        fake = FakeCurl([({"data": {"id": 1, "key": "nabc"}}, 201), ({}, 200),
+                         ({"data": {"url": "https://assets.st-note.com/e.png"}}, 201)])
+        r = NoteClient("_note_session_v5=s; XSRF-TOKEN=a%2Bb", runner=fake).create(
+            "T", "本文", publish=False, eyecatch=self.img)
+        self.assertEqual((r.status, r.eyecatch, r.warnings), ("draft", "https://assets.st-note.com/e.png", []))
+        cmd, _ = fake.calls[2]
+        self.assertIn("https://note.com/api/v1/image_upload/note_eyecatch", cmd)
+        for part in ("note_id=1", "width=1280", "height=670", "X-XSRF-TOKEN: a+b", "Origin: https://editor.note.com"):
+            self.assertIn(part, cmd)
+        self.assertIn(f'file=@"{self.img}";type=image/png;filename=eyecatch.png', cmd)
+        self.assertFalse(any("application/json" in c and c.startswith("Content-Type") for c in cmd))
+
+    def test_eyecatch_failure_keeps_draft(self):
+        fake = FakeCurl([({"data": {"id": 1, "key": "nabc"}}, 201), ({}, 200), ({"error": "x"}, 500)])
+        r = NoteClient("_note_session_v5=s; XSRF-TOKEN=t", runner=fake).create(
+            "T", "本文", publish=False, eyecatch=self.img)
+        self.assertEqual(r.status, "draft")
+        self.assertIsNone(r.eyecatch)
+        self.assertIn("見出し画像を付けられませんでした", r.warnings[0])
+
+    def test_xsrf_is_fetched_when_missing(self):
+        calls = []
+
+        def run(cmd, input=None, **kw):
+            calls.append(cmd)
+            if "-D" in cmd:
+                out = "HTTP/2 200\r\nset-cookie: XSRF-TOKEN=fresh%3D; path=/\r\n\r\n{}\n200"
+            else:
+                out = json.dumps({"data": {"url": "https://assets.st-note.com/e.png"}}) + "\n201"
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+        NoteClient("abc", runner=run).upload_eyecatch("1", self.img)
+        self.assertIn("X-XSRF-TOKEN: fresh=", calls[1])
+
+    def test_body_image_presigned_upload(self):
+        fake = FakeCurl([
+            ({"data": {"action": "https://bucket.s3.amazonaws.com/", "url": "https://assets.st-note.com/c.png",
+                       "post": {"key": "img/c.png", "policy": "@p"}}}, 200),
+            ("", 204),
+        ])
+        url = NoteClient("_note_session_v5=s; XSRF-TOKEN=t", runner=fake).upload_body_image(self.img)
+        self.assertEqual(url, "https://assets.st-note.com/c.png")
+        presign, s3 = fake.calls[0][0], fake.calls[1][0]
+        self.assertIn("https://note.com/api/v3/images/upload/presigned_post", presign)
+        self.assertIn("filename=eyecatch.png", presign)
+        self.assertFalse(any(c.startswith("file=@") for c in presign))
+        self.assertIn("https://bucket.s3.amazonaws.com/", s3)
+        self.assertFalse(any(c.startswith("Cookie") for c in s3))  # S3 にはログイン情報を送らない
+        self.assertIn("policy=@p", s3)
+        self.assertTrue(s3[-1].startswith("file=@"))  # ファイルは最後
+
+    def test_live_run_attaches_thumbnail_and_charts(self):
+        from publisher.note import NoteResult
+
+        cwd = os.getcwd()
+        os.chdir(self.tmp.name)
+        try:
+            Path("publish/inbox").mkdir(parents=True)
+            f = Path("publish/inbox/2026-10-05_weekday.md")
+            f.write_text("# ② note記事\n## タイトル\n【米国株】2026/10/05 引け後の振り返りと明日の展望\n## 本文\n"
+                         "本文\n\n" + chart_block(BAR) + "\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"NOTE_COOKIE": "x"}), \
+                    mock.patch("publisher.main.NoteClient") as nc:
+                nc.return_value.upload_body_image.return_value = "https://assets.st-note.com/c.png"
+                nc.return_value.create.return_value = NoteResult("1", "nabc", "draft", None,
+                                                                 "https://assets.st-note.com/e.png")
+                self.assertEqual(main_mod.main([str(f)]), 0)
+            args, kwargs = nc.return_value.create.call_args
+            self.assertIn("![セクター別騰落率", args[1])
+            self.assertEqual(kwargs["eyecatch"], Path("publish/media/2026-10-05_weekday/eyecatch.png"))
+            self.assertTrue(kwargs["eyecatch"].exists())
+            saved = json.loads(Path("publish/done/2026-10-05_weekday.json").read_text())
+            self.assertEqual((saved["note"]["eyecatch"], saved["note"]["charts"]), (True, 1))
+        finally:
+            os.chdir(cwd)
 
 
 if __name__ == "__main__":
