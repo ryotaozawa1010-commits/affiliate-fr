@@ -1,4 +1,4 @@
-"""publish/inbox/*.md（Gmail から受け取った公開版）を読んで note と X に投稿し、結果を publish/done/*.json に残す。
+"""publish/inbox/*.md（Gmail から受け取った公開版）を読んで note・Substack・X に投稿し、結果を publish/done/*.json に残す。
 
 使い方:
     python -m publisher.main publish/inbox/2026-10-04_weekend.md [--dry-run]
@@ -10,6 +10,10 @@
     NOTE_EMAIL, NOTE_PASSWORD … Cookie が無いときのログイン情報（note が reCAPTCHA を求めると失敗する）
     NOTE_URLNAME        … note のユーザー名（https://note.com/<ここ>）
     NOTE_MODE=draft|publish   … 既定は draft（下書き保存）
+    SUBSTACK_COOKIE     … Substack にログインしたブラウザの Cookie（substack.sid）。優先
+    SUBSTACK_EMAIL, SUBSTACK_PASSWORD … Cookie が無いときのログイン情報（ロボット確認で弾かれることがある）
+    SUBSTACK_PUBLICATION … Substack のサブドメイン（https://<ここ>.substack.com）
+    SUBSTACK_MODE=draft|publish … 既定は draft（下書き保存）
 """
 
 from __future__ import annotations
@@ -21,9 +25,11 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from publisher import affiliate
 from publisher.charts import embed
 from publisher.note import NoteClient, NoteError
 from publisher.parse import ParseError, parse
+from publisher.substack import SubstackClient, SubstackError
 from publisher.thumbnail import make_thumbnail
 from publisher.xpost import XCredentials, XPostError, build_thread, post_thread, weighted_length
 
@@ -46,6 +52,13 @@ def _note_client() -> NoteClient:
     if _env("NOTE_COOKIE"):
         return NoteClient(_env("NOTE_COOKIE"), urlname)
     return NoteClient.login(_env("NOTE_EMAIL"), _env("NOTE_PASSWORD"), urlname)
+
+
+def _substack_client() -> SubstackClient:
+    publication = _env("SUBSTACK_PUBLICATION")
+    if _env("SUBSTACK_COOKIE"):
+        return SubstackClient(publication, _env("SUBSTACK_COOKIE"))
+    return SubstackClient.login(publication, _env("SUBSTACK_EMAIL"), _env("SUBSTACK_PASSWORD"))
 
 
 def _thumbnail(title: str, stem: str, out: list[str]) -> Path | None:
@@ -84,12 +97,16 @@ def process(path: Path, *, dry_run: bool) -> bool:
     except ParseError as e:
         _summary(out + [f"❌ 読み取り失敗: {e}"])
         return False
+    payload.note_body = affiliate.apply(payload.note_body)
+    if payload.substack_body:
+        payload.substack_body = affiliate.apply_fr(payload.substack_body)
 
     premium = _env("X_PREMIUM").lower() == "true"
     publish_note = _env("NOTE_MODE").lower() == "publish"
+    publish_substack = _env("SUBSTACK_MODE").lower() == "publish"
     if path.stem.endswith("_drafttest"):
-        # 接続確認用: note には必ず下書きで作り、X には出さない
-        publish_note = False
+        # 接続確認用: note と Substack には必ず下書きで作り、X には出さない
+        publish_note = publish_substack = False
         payload.x_posts = []
         out.append("ファイル名が `_drafttest` で終わるため、note に下書きだけ作ります（公開・X 投稿はしません）。")
 
@@ -124,6 +141,35 @@ def process(path: Path, *, dry_run: bool) -> bool:
             except NoteError as e:
                 ok = False
                 out.append(f"❌ note: {e}")
+
+    # ---- Substack（フランス語版。週末版のメールにだけ入っている）
+    if payload.substack_title:
+        media = MEDIA_DIR / path.stem / "substack"
+        mode = "公開" if publish_substack else "下書き"
+        if result.get("substack"):
+            out.append(f"Substack: 処理済みのためスキップ（{result['substack']['status']}）")
+        elif dry_run:
+            charts = embed(payload.substack_body, media, None, lang="fr")
+            out.append(f"Substack（プレビュー）: 「{payload.substack_title}」 本文 {len(payload.substack_body)} 字 / "
+                       f"{mode}予定")
+            out += charts.notes + [f"⚠️ {w}" for w in charts.warnings]
+        elif not _env("SUBSTACK_PUBLICATION"):
+            out.append("Substack: SUBSTACK_PUBLICATION が未設定のためスキップ")
+        elif not _env("SUBSTACK_COOKIE") and not (_env("SUBSTACK_EMAIL") and _env("SUBSTACK_PASSWORD")):
+            out.append("Substack: SUBSTACK_COOKIE（または SUBSTACK_EMAIL / SUBSTACK_PASSWORD）が未設定のためスキップ")
+        else:
+            try:
+                client = _substack_client()
+                charts = embed(payload.substack_body, media, client.upload_image, lang="fr")
+                r = client.create(payload.substack_title, payload.substack_subtitle, charts.body,
+                                  publish=publish_substack)
+                result["substack"] = {"id": r.draft_id, "status": r.status, "url": r.url,
+                                      "charts": len(charts.notes)}
+                out.append(f"✅ Substack: {'公開しました ' + r.url if r.url else '下書きに保存しました（Substack で公開してください）'}")
+                out += charts.notes + [f"⚠️ {w}" for w in charts.warnings + r.warnings]
+            except SubstackError as e:
+                ok = False
+                out.append(f"❌ Substack: {e}")
 
     # ---- X
     if payload.x_posts:

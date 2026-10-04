@@ -72,6 +72,11 @@ jobs:
           NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
           NOTE_URLNAME: ${{ vars.NOTE_URLNAME }}
           NOTE_MODE: ${{ vars.NOTE_MODE }}
+          SUBSTACK_COOKIE: ${{ secrets.SUBSTACK_COOKIE }}
+          SUBSTACK_EMAIL: ${{ secrets.SUBSTACK_EMAIL }}
+          SUBSTACK_PASSWORD: ${{ secrets.SUBSTACK_PASSWORD }}
+          SUBSTACK_PUBLICATION: ${{ vars.SUBSTACK_PUBLICATION || 'marchsenbref' }}
+          SUBSTACK_MODE: ${{ vars.SUBSTACK_MODE }}
         run: |
           python -m publisher.main ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
 

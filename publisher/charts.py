@@ -43,10 +43,17 @@ class Chart:
     type: str = "bar"
     labels: list[str] = field(default_factory=list)
     series: list[tuple[str, list[float]]] = field(default_factory=list)
+    lang: str = "ja"  # "fr" のときは出典の書き方をフランス語にする（Substack 用）
 
     @property
     def caption(self) -> str:
+        if self.lang == "fr":
+            return f"{self.title} (source : {self.source})"
         return f"{self.title}（出典: {self.source}）"
+
+    @property
+    def source_line(self) -> str:
+        return f"Source : {self.source}" if self.lang == "fr" else f"出典: {self.source}"
 
 
 def parse_spec(text: str) -> Chart:
@@ -96,7 +103,7 @@ def as_text(chart: Chart) -> str:
             lines.append(f"- {name}: " + " → ".join(_fmt(v, chart.unit, False) for v in values))
         else:
             lines += [f"- {l}: {_fmt(v, chart.unit, signed)}" for l, v in zip(chart.labels, values)]
-    return "\n".join(lines + ["", f"出典: {chart.source}"])
+    return "\n".join(lines + ["", chart.source_line])
 
 
 def render(chart: Chart, out: Path) -> Path:
@@ -151,7 +158,7 @@ def render(chart: Chart, out: Path) -> Path:
     ax.set_axisbelow(True)
 
     fig.suptitle(chart.title, x=0.02, ha="left", fontsize=24, fontweight="bold", color=rgb(INK))
-    fig.text(0.02, 0.02, f"出典: {chart.source}", fontsize=13, color=rgb(GRAY))
+    fig.text(0.02, 0.02, chart.source_line, fontsize=13, color=rgb(GRAY))
     fig.tight_layout(rect=(0, 0.05, 1, 0.95))
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +174,7 @@ class ChartReport:
     warnings: list[str] = field(default_factory=list)
 
 
-def embed(body_md: str, out_dir: Path, upload: Callable[[Path], str] | None) -> ChartReport:
+def embed(body_md: str, out_dir: Path, upload: Callable[[Path], str] | None, *, lang: str = "ja") -> ChartReport:
     """本文中の ```chart ブロックを画像にして upload し、Markdown の画像（![説明](URL)）に置き換える。
 
     upload が None（投稿しない確認モード）のときは画像だけ作り、本文は文章版にする。
@@ -180,6 +187,7 @@ def embed(body_md: str, out_dir: Path, upload: Callable[[Path], str] | None) -> 
         n += 1
         try:
             chart = parse_spec(m.group(1))
+            chart.lang = lang
         except ChartError as e:
             report.warnings.append(f"グラフ{n}: 書式が正しくないため省きました（{e}）")
             return ""
