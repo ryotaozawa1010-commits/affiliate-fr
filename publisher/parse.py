@@ -25,6 +25,7 @@ X_HEADER = re.compile(r"^#\s*①?\s*X投稿")
 NOTE_HEADER = re.compile(r"^#\s*②?\s*note記事")
 POST_HEADER = re.compile(r"^###\s*(\d+)\s*/\s*(\d+)\s*$")
 RULE = re.compile(r"^\s*-{3,}\s*$")
+TOP_HEADER = re.compile(r"^#\s")
 
 
 class ParseError(ValueError):
@@ -73,7 +74,8 @@ def parse(text: str) -> Payload:
             raise ParseError("X投稿セクションに「### 1/N」形式のポストがありません")
 
     if note_start is not None:
-        end = x_start if x_start is not None and x_start > note_start else len(lines)
+        # note 記事は次の大見出し（「# ③ Substack記事」など）の手前まで
+        end = next((i for i in range(note_start + 1, len(lines)) if TOP_HEADER.match(lines[i])), len(lines))
         section = lines[note_start + 1 : end]
         title_i = next((i for i, l in enumerate(section) if re.match(r"^##\s*タイトル", l)), None)
         body_i = next((i for i, l in enumerate(section) if re.match(r"^##\s*本文", l)), None)
