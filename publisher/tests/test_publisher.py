@@ -47,6 +47,15 @@ class ParseTest(unittest.TestCase):
         with self.assertRaises(ParseError):
             parse("# 何もない\n本文")
 
+    def test_note_stops_at_next_top_section(self):
+        # 2026-10-05: Cowork が note 記事の後ろに「# ③ Substack記事」（仏語）を付けてきた
+        text = ("# ② note記事\n## タイトル\nT\n## 本文\n本文です。\n\n---\n\n本記事は投資助言ではありません。\n\n---\n\n"
+                "# ③ Substack記事\n## タイトル\nTitre\n## 本文\nL'or a absorbé un choc.\n")
+        p = parse(text)
+        self.assertEqual(p.note_title, "T")
+        self.assertTrue(p.note_body.endswith("本記事は投資助言ではありません。"))
+        self.assertNotIn("Substack", p.note_body)
+
     def test_note_without_body(self):
         with self.assertRaises(ParseError):
             parse("# ② note記事\n## タイトル\nT\n")
