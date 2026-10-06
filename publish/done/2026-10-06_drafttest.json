@@ -1,4 +1,10 @@
 {
   "source": "publish/inbox/2026-10-06_drafttest.md",
-  "updated_at": "2026-10-06T07:59:44+00:00"
+  "updated_at": "2026-10-06T08:23:29+00:00",
+  "substack": {
+    "status": "kit_sent",
+    "to": "ryotaozawa1010@gmail.com",
+    "cover": true,
+    "charts": 1
+  }
 }
