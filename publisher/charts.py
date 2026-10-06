@@ -44,9 +44,14 @@ class Chart:
     labels: list[str] = field(default_factory=list)
     series: list[tuple[str, list[float]]] = field(default_factory=list)
 
-    @property
-    def caption(self) -> str:
+    def caption(self, lang: str = "ja") -> str:
+        if lang == "fr":
+            return f"{self.title} (source : {self.source})"
         return f"{self.title}（出典: {self.source}）"
+
+
+def _source_label(lang: str) -> str:
+    return "Source :" if lang == "fr" else "出典:"
 
 
 def parse_spec(text: str) -> Chart:
@@ -87,7 +92,7 @@ def _fmt(v: float, unit: str, signed: bool) -> str:
     return f"{s}{unit}"
 
 
-def as_text(chart: Chart) -> str:
+def as_text(chart: Chart, lang: str = "ja") -> str:
     """グラフにできなかったときの代わりの文章（Markdown）。"""
     signed = chart.type == "bar" and any(v < 0 for _, vs in chart.series for v in vs)
     lines = [f"**{chart.title}**", ""]
@@ -96,10 +101,10 @@ def as_text(chart: Chart) -> str:
             lines.append(f"- {name}: " + " → ".join(_fmt(v, chart.unit, False) for v in values))
         else:
             lines += [f"- {l}: {_fmt(v, chart.unit, signed)}" for l, v in zip(chart.labels, values)]
-    return "\n".join(lines + ["", f"出典: {chart.source}"])
+    return "\n".join(lines + ["", f"{_source_label(lang)} {chart.source}"])
 
 
-def render(chart: Chart, out: Path) -> Path:
+def render(chart: Chart, out: Path, lang: str = "ja") -> Path:
     import matplotlib
 
     matplotlib.use("Agg")
@@ -151,7 +156,7 @@ def render(chart: Chart, out: Path) -> Path:
     ax.set_axisbelow(True)
 
     fig.suptitle(chart.title, x=0.02, ha="left", fontsize=24, fontweight="bold", color=rgb(INK))
-    fig.text(0.02, 0.02, f"出典: {chart.source}", fontsize=13, color=rgb(GRAY))
+    fig.text(0.02, 0.02, f"{_source_label(lang)} {chart.source}", fontsize=13, color=rgb(GRAY))
     fig.tight_layout(rect=(0, 0.05, 1, 0.95))
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -167,7 +172,7 @@ class ChartReport:
     warnings: list[str] = field(default_factory=list)
 
 
-def embed(body_md: str, out_dir: Path, upload: Callable[[Path], str] | None) -> ChartReport:
+def embed(body_md: str, out_dir: Path, upload: Callable[[Path], str] | None, *, lang: str = "ja") -> ChartReport:
     """本文中の ```chart ブロックを画像にして upload し、Markdown の画像（![説明](URL)）に置き換える。
 
     upload が None（投稿しない確認モード）のときは画像だけ作り、本文は文章版にする。
@@ -184,20 +189,20 @@ def embed(body_md: str, out_dir: Path, upload: Callable[[Path], str] | None) -> 
             report.warnings.append(f"グラフ{n}: 書式が正しくないため省きました（{e}）")
             return ""
         try:
-            path = render(chart, out_dir / f"chart_{n}.png")
+            path = render(chart, out_dir / f"chart_{n}.png", lang)
         except Exception as e:  # noqa: BLE001  グラフが作れなくても記事は出す
             report.warnings.append(f"グラフ{n}「{chart.title}」: 画像を作れず文章にしました（{e}）")
-            return as_text(chart)
+            return as_text(chart, lang)
         if upload is None:
             report.notes.append(f"グラフ{n}「{chart.title}」を作成（{path}）")
-            return as_text(chart)
+            return as_text(chart, lang)
         try:
             url = upload(path)
         except Exception as e:  # noqa: BLE001
             report.warnings.append(f"グラフ{n}「{chart.title}」: アップロードに失敗したので文章にしました（{e}）")
-            return as_text(chart)
+            return as_text(chart, lang)
         report.notes.append(f"グラフ{n}「{chart.title}」を挿入")
-        caption = chart.caption.replace("[", "［").replace("]", "］")
+        caption = chart.caption(lang).replace("[", "［").replace("]", "］")
         return f'![{caption}]({url} "620x{round(620 * CHART_H / CHART_W)}")'
 
     report.body = BLOCK.sub(replace, body_md)

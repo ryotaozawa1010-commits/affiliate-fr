@@ -676,5 +676,119 @@ class NoteImageTest(unittest.TestCase):
             os.chdir(cwd)
 
 
+SUBSTACK_MD = (
+    "# ② note記事\n## タイトル\n【米国株】2026/10/05 引け後\n## 本文\n本文です。\n\n---\n\n"
+    "# ③ Substack記事\n\n## タイトル\nQuand le scénario est juste\n\n## サブタイトル\nSéance du 5 octobre\n\n"
+    "## 本文\n\nLe scénario était **bon**.\nDeuxième ligne.\n\n### L'or\n\n- un\n- deux\n\n"
+    "```chart\n" + json.dumps({"type": "bar", "title": "Variations du jour", "unit": "%", "labels": ["Or", "WTI"],
+                               "values": [0.1, -1.2], "source": "Stooq"}) + "\n```\n\n---\n"
+)
+
+
+class SubstackTest(unittest.TestCase):
+    def test_parse_substack_section(self):
+        p = parse(SUBSTACK_MD)
+        self.assertEqual((p.substack_title, p.substack_subtitle), ("Quand le scénario est juste", "Séance du 5 octobre"))
+        self.assertTrue(p.substack_body.startswith("Le scénario était **bon**."))
+        self.assertTrue(p.substack_body.endswith("```"))
+        self.assertEqual(p.note_body, "本文です。")
+
+    def test_session_cookie(self):
+        from publisher.substack import session_cookie
+
+        self.assertEqual(session_cookie("s%3Aabc.def"), "connect.sid=s%3Aabc.def; substack.sid=s%3Aabc.def")
+        self.assertEqual(session_cookie("cookie: ab=1; connect.sid=s%3Ax; cf=2"), "connect.sid=s%3Ax; substack.sid=s%3Ax")
+
+    def test_prosemirror(self):
+        from publisher.substack import markdown_to_prosemirror
+
+        doc = markdown_to_prosemirror(
+            "Le **bon** mot.\nLigne 2\n\n### Titre\n\n- un\n- deux\n\n> cite\n\n---\n\n"
+            '![Variations (source : Stooq)](https://substackcdn.com/c.png "620x380")')
+        types = [n["type"] for n in doc["content"]]
+        self.assertEqual(types, ["paragraph", "paragraph", "heading", "bullet_list", "blockquote",
+                                 "horizontal_rule", "captionedImage"])
+        self.assertEqual(doc["content"][0]["content"][1], {"type": "text", "text": "bon", "marks": [{"type": "strong"}]})
+        self.assertEqual(doc["content"][2]["attrs"], {"level": 3})
+        item = doc["content"][3]["content"][0]
+        self.assertEqual(item, {"type": "list_item", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "un"}]}]})
+        img, cap = doc["content"][6]["content"]
+        self.assertEqual((img["type"], img["attrs"]["src"], img["attrs"]["width"], img["attrs"]["height"]),
+                         ("image2", "https://substackcdn.com/c.png", 620, 380))
+        self.assertEqual(cap["content"][0]["text"], "Variations (source : Stooq)")
+
+    def test_create_draft_with_cover(self):
+        from publisher.substack import SubstackClient
+
+        fake = FakeCurl([
+            ({"id": 42, "publicationUsers": [{"is_primary": True, "publication": {"subdomain": "ryota", "custom_domain": None}}]}, 200),
+            ({"id": 9001}, 200),
+            ({"url": "https://substackcdn.com/cover.png"}, 200),
+            ({"id": 9001}, 200),
+        ])
+        with tempfile.TemporaryDirectory() as d:
+            cover = make_thumbnail("Titre", Path(d) / "eyecatch.png", tag="Marchés US", date="05/10/2026")
+            r = SubstackClient("s%3Asecret", runner=fake).create_draft("Titre", "Sous-titre", "Texte **gras**", cover=cover)
+        self.assertEqual((r.draft_id, r.edit_url, r.cover), ("9001", "https://ryota.substack.com/publish/post/9001",
+                                                               "https://substackcdn.com/cover.png"))
+        self.assertIn("https://substack.com/api/v1/user/profile/self", fake.calls[0][0])
+        cmd, body = fake.calls[1]
+        self.assertIn("https://ryota.substack.com/api/v1/drafts", cmd)
+        self.assertIn("Referer: https://ryota.substack.com/publish/home", cmd)
+        self.assertEqual(body["draft_bylines"], [{"id": 42, "is_guest": False}])
+        self.assertEqual(json.loads(body["draft_body"])["type"], "doc")  # 本文は JSON の「文字列」で送る
+        self.assertTrue(fake.calls[2][1]["image"].startswith("data:image/png;base64,"))
+        self.assertNotIn("base64", " ".join(fake.calls[2][0]))  # 画像はコマンドラインに載せない
+        self.assertIn("PUT", fake.calls[3][0])
+        self.assertEqual(fake.calls[3][1], {"cover_image": "https://substackcdn.com/cover.png"})
+
+    def test_auth_error_has_hint(self):
+        from publisher.substack import SubstackClient, SubstackError
+
+        with self.assertRaisesRegex(SubstackError, "期限切れ"):
+            SubstackClient("x", runner=FakeCurl([({"error": "x"}, 401)])).create_draft("T", "", "b")
+
+    def test_french_chart_caption(self):
+        with tempfile.TemporaryDirectory() as d:
+            rep = embed(chart_block({**BAR, "title": "Variations"}), Path(d), lambda p: "https://substackcdn.com/c.png", lang="fr")
+            fallback = embed(chart_block(BAR), Path(d), None, lang="fr")
+        self.assertIn("![Variations (source : S&P Dow Jones Indices)](https://substackcdn.com/c.png", rep.body)
+        self.assertIn("Source : S&P Dow Jones Indices", fallback.body)
+
+    def test_main_creates_substack_draft(self):
+        from publisher.note import NoteResult
+        from publisher.substack import SubstackResult
+
+        with tempfile.TemporaryDirectory() as d:
+            cwd = os.getcwd()
+            os.chdir(d)
+            try:
+                Path("publish/inbox").mkdir(parents=True)
+                f = Path("publish/inbox/2026-10-05_weekday.md")
+                f.write_text(SUBSTACK_MD, encoding="utf-8")
+                env = {"NOTE_COOKIE": "x", "SUBSTACK_COOKIE": "s%3Ay"}
+                with mock.patch.dict(os.environ, env), mock.patch("publisher.main.NoteClient") as nc, \
+                        mock.patch("publisher.main.SubstackClient") as sc:
+                    nc.return_value.create.return_value = NoteResult("1", "nabc", "draft", None)
+                    sc.return_value.upload_image.return_value = "https://substackcdn.com/c.png"
+                    sc.return_value.create_draft.return_value = SubstackResult(
+                        "9001", "https://ryota.substack.com/publish/post/9001", "https://substackcdn.com/e.png")
+                    self.assertEqual(main_mod.main([str(f)]), 0)
+                    self.assertEqual(main_mod.main([str(f)]), 0)  # 2 回目は作らない
+                args, kwargs = sc.return_value.create_draft.call_args
+                self.assertEqual(sc.return_value.create_draft.call_count, 1)
+                self.assertEqual(args[:2], ("Quand le scénario est juste", "Séance du 5 octobre"))
+                self.assertIn("![Variations du jour (source : Stooq)](https://substackcdn.com/c.png", args[2])
+                self.assertEqual(kwargs["cover"], Path("publish/media/2026-10-05_weekday/substack/eyecatch.png"))
+                self.assertTrue(kwargs["cover"].exists())
+                note_body = nc.return_value.create.call_args[0][1]
+                self.assertNotIn("Substack", note_body)
+                saved = json.loads(Path("publish/done/2026-10-05_weekday.json").read_text())
+                self.assertEqual(saved["substack"]["id"], "9001")
+                self.assertEqual(saved["substack"]["charts"], 1)
+            finally:
+                os.chdir(cwd)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -76,7 +76,28 @@ def split_title(title: str) -> tuple[str, str, str]:
     return tag, date, title.strip() or tag or date
 
 
+def _wrap_words(text: str, font, max_width: int) -> list[str]:
+    """欧文は単語の切れ目で折り返す（1語が長すぎるときだけ文字で切る）。"""
+    lines: list[str] = []
+    for word in text.split():
+        if lines and font.getlength(lines[-1] + " " + word) <= max_width:
+            lines[-1] += " " + word
+        elif font.getlength(word) <= max_width:
+            lines.append(word)
+        else:
+            lines += _wrap_chars(word, font, max_width)
+    return lines
+
+
 def wrap(text: str, font, max_width: int) -> list[str]:
+    """日本語は 1 文字単位、欧文（仏語など）は単語単位で折り返す。"""
+    cjk = sum(1 for c in text if ord(c) > 0x2E80)
+    if " " in text.strip() and cjk < len(text) * 0.3:
+        return _wrap_words(text, font, max_width)
+    return _wrap_chars(text, font, max_width)
+
+
+def _wrap_chars(text: str, font, max_width: int) -> list[str]:
     """日本語を 1 文字単位で折り返す。きりのいい位置（助詞・読点の後）があればそこで切る。"""
     lines: list[str] = []
     rest = text
@@ -103,7 +124,7 @@ def _fit_headline(draw, text: str, font_path: str, index: int, max_width: int, m
     from PIL import ImageFont
 
     # 大きい字で 2 行に収まるならそれを優先し、だめなら 3 行まで許す
-    for max_lines, min_size in ((2, 64), (3, 40)):
+    for max_lines, min_size in ((2, 64), (3, 40), (4, 40)):
         for size in range(92, min_size - 1, -4):
             font = ImageFont.truetype(font_path, size, index=index)
             lines = wrap(text, font, max_width)
@@ -135,14 +156,19 @@ def _poster(height: int):
     return crop, fade
 
 
-def make_thumbnail(title: str, out: Path, *, kind: str = "") -> Path:
+def make_thumbnail(title: str, out: Path, *, kind: str = "", tag: str | None = None,
+                   date: str | None = None) -> Path:
+    """tag / date を渡したときは title をそのまま見出しにする（Substack の仏語記事など）。"""
     try:
         from PIL import Image, ImageDraw, ImageFont
     except ImportError as e:  # pragma: no cover
         raise ThumbnailError("Pillow が入っていません") from e
 
     font_path, index = find_font()
-    tag, date, headline = split_title(title)
+    if tag is None and date is None:
+        tag, date, headline = split_title(title)
+    else:
+        tag, date, headline = tag or "", date or "", title.strip()
 
     img = Image.new("RGB", (WIDTH, HEIGHT), CREAM)
     poster, mask = _poster(HEIGHT)

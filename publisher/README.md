@@ -84,6 +84,22 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 
 日本語 140 字を超えるポストは自動で分割してスレッドにつなぎます（X Premium なら Variable `X_PREMIUM` = `true` で分割しない）。
 
+## Substack（仏語記事）
+
+Cowork の公開版に「# ③ Substack記事」（`## タイトル` / `## サブタイトル` / `## 本文`）があれば、
+Substack にも**下書き**を作ります（公開はしません）。note と同じく見出し画像（タグ「Marchés US」と日付入り）と
+出典付きのグラフ（キャプションは「(source : …)」）を付けます。
+
+Substack にも公式の投稿 API がないため、note と同じくブラウザの Cookie を使います。
+
+1. PC の Chrome（Ryota のプロフィール）で Substack にログインした状態で、自分の Substack のダッシュボードを開く
+2. 開発者ツール（⌥⌘I）→ **Application** → 左の **Cookies** → `https://substack.com`（または自分の publication の URL）
+3. `connect.sid`（無ければ `substack.sid`）の **Value** をコピー
+4. GitHub の Secret `SUBSTACK_COOKIE` に貼る（https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/secrets/actions/new）
+
+書き込む publication は自動で選びます（主たる publication）。別のものに書きたいときだけ Variable `SUBSTACK_URL`
+（例: `https://xxxx.substack.com`）を設定します。毎日の「入館証チェック」で Substack の Cookie も確認します。
+
 ## 見出し画像とグラフ
 
 - **見出し画像**: `publisher/assets/thumbnail_base.jpg`（TRADING のフクロウ）を右に、記事タイトルを
@@ -123,6 +139,7 @@ Secrets を登録したらこれで受け取りまで確認できます（3日�
 | `publisher/note.py` | Markdown → note 用 HTML 変換、note への下書き保存・公開、画像のアップロード |
 | `publisher/thumbnail.py` | タイトル入りの見出し画像を作る |
 | `publisher/charts.py` | 本文の ```chart ブロックをグラフ画像にする |
+| `publisher/substack.py` | Markdown → Substack 形式の変換、Substack への下書き保存・画像アップロード |
 | `publisher/xpost.py` | X の文字数計算・分割・OAuth 署名・スレッド投稿（停止中） |
 | `publisher/main.py` | 全体の流れと二重投稿防止 |
 | `publish/inbox/` | 受け取った公開版（Gmail から保存したもの） |
