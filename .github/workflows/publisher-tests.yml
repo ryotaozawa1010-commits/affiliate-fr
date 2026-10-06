@@ -15,6 +15,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk
+      - run: timeout 300 bash -c 'sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk'
       - run: pip install -r publisher/requirements.txt oauthlib
       - run: python -m unittest discover -s publisher/tests -t . -v
