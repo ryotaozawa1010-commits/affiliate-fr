@@ -27,7 +27,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -37,8 +37,16 @@ jobs:
 
       - name: 見出し画像・グラフ用の日本語フォントと部品を入れる
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk
           pip install -r publisher/requirements.txt
+          # apt が10分止まったことがある（2026-10-06）ので時間を区切り、だめならフォントだけ直接取る。
+          # フォントが無くても記事は出る（見出し画像は省略、グラフは文章になる）ので、ここでは失敗させない
+          if ! timeout 180 bash -c 'sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends fonts-noto-cjk'; then
+            echo "apt でフォントを入れられなかったので直接取得します"
+            mkdir -p ~/.fonts
+            curl -fsSL --max-time 120 -o ~/.fonts/NotoSansCJKjp-Bold.otf \
+              https://github.com/notofonts/noto-cjk/raw/main/Sans/OTF/Japanese/NotoSansCJKjp-Bold.otf \
+              || echo "::warning::日本語フォントを取得できませんでした（見出し画像・グラフなしで続けます）"
+          fi
 
       - name: Gmail から投稿用メールを受け取る
         id: files

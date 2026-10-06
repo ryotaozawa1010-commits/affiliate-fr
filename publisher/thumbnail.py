@@ -29,6 +29,8 @@ FONT_CANDIDATES = [
     ("/System/Library/Fonts/ヒラギノ角ゴシック W8.ttc", 0),
     ("/System/Library/Fonts/ヒラギノ角ゴシック W6.ttc", 0),
     ("/usr/share/fonts/opentype/ipafont-gothic/ipag.ttf", 0),
+    # apt が使えなかったときに GitHub Actions が直接取ってくる置き場所
+    (str(Path.home() / ".fonts" / "NotoSansCJKjp-Bold.otf"), 0),
 ]
 
 # 行頭に来てはいけない文字・行末で切りやすい位置（助詞や読点の後ろ）
