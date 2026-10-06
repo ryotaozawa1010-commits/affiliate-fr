@@ -10,8 +10,8 @@
     NOTE_EMAIL, NOTE_PASSWORD … Cookie が無いときのログイン情報（note が reCAPTCHA を求めると失敗する）
     NOTE_URLNAME        … note のユーザー名（https://note.com/<ここ>）
     NOTE_MODE=draft|publish   … 既定は draft（下書き保存）
-    SUBSTACK_COOKIE     … Substack にログインしたブラウザの Cookie（connect.sid）。無ければ Substack はスキップ
-    SUBSTACK_URL        … 書き込む publication の URL（通常は自動で分かるので不要）
+    GMAIL_ADDRESS, GMAIL_APP_PASSWORD … Substack の投稿セットをメールで送るのに使う（受け取り用 Gmail）
+    SUBSTACK_KIT_TO     … 投稿セットの宛先（既定は ryotaozawa1010@gmail.com）
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from pathlib import Path
 from publisher.charts import embed
 from publisher.note import NoteClient, NoteError
 from publisher.parse import ParseError, Payload, parse
-from publisher.substack import SubstackClient, SubstackError
+from publisher import substack_kit
 from publisher.thumbnail import make_thumbnail
 from publisher.xpost import XCredentials, XPostError, build_thread, post_thread, weighted_length
 
@@ -67,36 +67,38 @@ def _thumbnail(title: str, stem: str, out: list[str], *, lang: str = "ja") -> Pa
 
 
 def _substack(payload: Payload, stem: str, result: dict, out: list[str], *, dry_run: bool) -> bool:
-    """Substack（仏語記事）に下書きを作る。失敗したら False。"""
+    """Substack（仏語記事）の投稿セット（本文・サムネ・グラフ画像）を Ryota にメールで送る。失敗したら False。
+
+    Substack はデータセンターからの通信をロボット確認で止めるので、投稿そのものは Ryota がアプリで行う。
+    """
     if result.get("substack"):
-        out.append("Substack: 処理済みのためスキップ")
+        out.append("Substack: 投稿セットは送信済みのためスキップ")
         return True
     media = MEDIA_DIR / stem / "substack"
-    if dry_run:
-        cover = _thumbnail(payload.substack_title, stem, out, lang="fr")
-        charts = embed(payload.substack_body, media, None, lang="fr")
-        out.append(f"Substack（プレビュー）: 「{payload.substack_title}」 本文 {len(payload.substack_body)} 字 / 下書き予定")
-        if cover:
-            out.append(f"見出し画像を作成（{cover}）")
-        out.extend(charts.notes + [f"⚠️ {w}" for w in charts.warnings])
-        return True
-    if not _env("SUBSTACK_COOKIE"):
-        out.append("Substack: SUBSTACK_COOKIE が未設定のためスキップ")
-        return True
+    cover = _thumbnail(payload.substack_title, stem, out, lang="fr")
+    charts = embed(payload.substack_body, media, substack_kit.kit_upload, lang="fr")
+    to = _env("SUBSTACK_KIT_TO") or "ryotaozawa1010@gmail.com"
+    y, m, d = (stem.split("_", 1)[0].split("-") + ["", "", ""])[:3]
     try:
-        client = SubstackClient(_env("SUBSTACK_COOKIE"), _env("SUBSTACK_URL") or None)
-        cover = _thumbnail(payload.substack_title, stem, out, lang="fr")
-        charts = embed(payload.substack_body, media, client.upload_image, lang="fr")
-        r = client.create_draft(payload.substack_title, payload.substack_subtitle, charts.body, cover=cover)
-    except SubstackError as e:
-        out.append(f"❌ Substack: {e}")
+        msg = substack_kit.build(payload.substack_title, payload.substack_subtitle, charts.body, cover=cover,
+                                 media_dir=media, sender=_env("GMAIL_ADDRESS") or to, to=to,
+                                 date_label=f"{d}/{m}/{y}" if d else "")
+        if dry_run:
+            media.mkdir(parents=True, exist_ok=True)
+            (media / "kit.eml").write_bytes(bytes(msg))
+            out.append(f"Substack（プレビュー）: 「{payload.substack_title}」の投稿セットを作成（{media / 'kit.eml'}）")
+            out.extend(charts.notes + [f"⚠️ {w}" for w in charts.warnings])
+            return True
+        if not (_env("GMAIL_ADDRESS") and _env("GMAIL_APP_PASSWORD")):
+            out.append("Substack: GMAIL_ADDRESS / GMAIL_APP_PASSWORD が未設定のため投稿セットを送れません")
+            return True
+        substack_kit.send(msg, address=_env("GMAIL_ADDRESS"), app_password=_env("GMAIL_APP_PASSWORD"))
+    except substack_kit.KitError as e:
+        out.append(f"❌ Substack 投稿セット: {e}")
         return False
-    result["substack"] = {"id": r.draft_id, "edit_url": r.edit_url, "status": "draft",
-                          "cover": bool(r.cover), "charts": len(charts.notes)}
-    out.append(f"✅ Substack: 下書きに保存しました {r.edit_url}")
-    if r.cover:
-        out.append("見出し画像: 設定しました")
-    out.extend(charts.notes + [f"⚠️ {w}" for w in charts.warnings + r.warnings])
+    result["substack"] = {"status": "kit_sent", "to": to, "cover": bool(cover), "charts": len(charts.notes)}
+    out.append(f"✅ Substack: 投稿セットをメールで送りました（サムネ{'あり' if cover else 'なし'}・グラフ {len(charts.notes)} 枚）")
+    out.extend(charts.notes + [f"⚠️ {w}" for w in charts.warnings])
     return True
 
 
@@ -167,7 +169,7 @@ def process(path: Path, *, dry_run: bool) -> bool:
                 ok = False
                 out.append(f"❌ note: {e}")
 
-    # ---- Substack（仏語記事。下書きのみ）
+    # ---- Substack（仏語記事。投稿セットをメールで届ける）
     if payload.substack_title:
         ok = _substack(payload, path.stem, result, out, dry_run=dry_run) and ok
 

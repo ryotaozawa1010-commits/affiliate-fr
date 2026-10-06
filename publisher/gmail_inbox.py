@@ -32,6 +32,7 @@ import quopri
 import re
 import sys
 import textwrap
+import urllib.parse
 from email.message import Message
 from email.utils import parseaddr
 from pathlib import Path
@@ -121,6 +122,20 @@ def _plain_text(msg: Message) -> str:
     return text
 
 
+GOOGLE_REDIRECT = re.compile(r"<?https://www\.google\.com/url\?q=([^&\s>]+)(?:&[^\s>・、，,（）()]*)?>?")
+
+
+def _unlink(text: str) -> str:
+    """Gmail が本文中のサイト名（例: tradingeconomics.com）に付ける Google 経由のリンクを元の文字に戻す。"""
+    def back(m: re.Match) -> str:
+        url = urllib.parse.unquote(m.group(1))
+        # 元が「tradingeconomics.com」のような裸のドメインなら、Gmail が足した http:// を外す
+        bare = re.fullmatch(r"http://([^/\s]+)/?", url)
+        return bare.group(1) if bare else url
+
+    return GOOGLE_REDIRECT.sub(back, text)
+
+
 def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
     """メール1通を検査して (ファイル名の stem, 中身) を返す。条件を満たさなければ Rejected。"""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
@@ -138,7 +153,7 @@ def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
     if not b or not b.group(1).strip():
         raise Rejected("-----BEGIN----- 〜 -----END----- の中身がありません")
     # 指示文の字下げごとコピーされた場合に備えて、共通の字下げを外す
-    return m.group(1), textwrap.dedent(b.group(1)).strip() + "\n"
+    return m.group(1), _unlink(textwrap.dedent(b.group(1)).strip()) + "\n"
 
 
 def _connect() -> imaplib.IMAP4_SSL:

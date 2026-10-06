@@ -1,4 +1,4 @@
-name: note・Substack 入館証チェック
+name: note 入館証チェック
 
 on:
   schedule:
@@ -17,9 +17,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r publisher/requirements.txt
-      - name: note と Substack にログインできるか確認（記事は作らない）
+      - name: note にログインできるか確認（記事は作らない）
         env:
           NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
-          SUBSTACK_COOKIE: ${{ secrets.SUBSTACK_COOKIE }}
-          SUBSTACK_URL: ${{ vars.SUBSTACK_URL }}
         run: python -m publisher.note_check

@@ -72,8 +72,10 @@ jobs:
           NOTE_COOKIE: ${{ secrets.NOTE_COOKIE }}
           NOTE_URLNAME: ${{ vars.NOTE_URLNAME }}
           NOTE_MODE: ${{ vars.NOTE_MODE }}
-          SUBSTACK_COOKIE: ${{ secrets.SUBSTACK_COOKIE }}
-          SUBSTACK_URL: ${{ vars.SUBSTACK_URL }}
+          # Substack の投稿セットをメールで送るのに使う
+          GMAIL_ADDRESS: ${{ vars.GMAIL_ADDRESS || 'u1132038801@gmail.com' }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          SUBSTACK_KIT_TO: ${{ vars.SUBSTACK_KIT_TO || 'ryotaozawa1010@gmail.com' }}
         run: |
           python -m publisher.main ${{ steps.files.outputs.files }} ${{ inputs.dry_run && '--dry-run' || '' }}
 
