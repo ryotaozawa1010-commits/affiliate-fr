@@ -10,6 +10,8 @@
     NOTE_EMAIL, NOTE_PASSWORD … Cookie が無いときのログイン情報（note が reCAPTCHA を求めると失敗する）
     NOTE_URLNAME        … note のユーザー名（https://note.com/<ここ>）
     NOTE_MODE=draft|publish   … 既定は draft（下書き保存）
+    SUBSTACK_COOKIE     … Substack にログインしたブラウザの Cookie（connect.sid）。無ければ Substack はスキップ
+    SUBSTACK_URL        … 書き込む publication の URL（通常は自動で分かるので不要）
 """
 
 from __future__ import annotations
@@ -23,7 +25,8 @@ from pathlib import Path
 
 from publisher.charts import embed
 from publisher.note import NoteClient, NoteError
-from publisher.parse import ParseError, parse
+from publisher.parse import ParseError, Payload, parse
+from publisher.substack import SubstackClient, SubstackError
 from publisher.thumbnail import make_thumbnail
 from publisher.xpost import XCredentials, XPostError, build_thread, post_thread, weighted_length
 
@@ -48,14 +51,53 @@ def _note_client() -> NoteClient:
     return NoteClient.login(_env("NOTE_EMAIL"), _env("NOTE_PASSWORD"), urlname)
 
 
-def _thumbnail(title: str, stem: str, out: list[str]) -> Path | None:
+def _thumbnail(title: str, stem: str, out: list[str], *, lang: str = "ja") -> Path | None:
     """記事タイトル入りの見出し画像を作る。作れなくても記事は出すので None を返すだけにする。"""
     kind = "WEEKLY REVIEW" if stem.endswith("_weekend") else "MARKET CLOSE" if stem.endswith("_weekday") else ""
     try:
+        if lang == "fr":
+            # 仏語記事のタイトルには【タグ】や日付が入らないので、ファイル名の日付から足す
+            y, m, d = (stem.split("_", 1)[0].split("-") + ["", "", ""])[:3]
+            return make_thumbnail(title, MEDIA_DIR / stem / "substack" / "eyecatch.png", kind=kind,
+                                  tag="Marchés US", date=f"{d}/{m}/{y}" if d else "")
         return make_thumbnail(title, MEDIA_DIR / stem / "eyecatch.png", kind=kind)
     except Exception as e:  # noqa: BLE001
         out.append(f"⚠️ 見出し画像を作れませんでした（{e}）")
         return None
+
+
+def _substack(payload: Payload, stem: str, result: dict, out: list[str], *, dry_run: bool) -> bool:
+    """Substack（仏語記事）に下書きを作る。失敗したら False。"""
+    if result.get("substack"):
+        out.append("Substack: 処理済みのためスキップ")
+        return True
+    media = MEDIA_DIR / stem / "substack"
+    if dry_run:
+        cover = _thumbnail(payload.substack_title, stem, out, lang="fr")
+        charts = embed(payload.substack_body, media, None, lang="fr")
+        out.append(f"Substack（プレビュー）: 「{payload.substack_title}」 本文 {len(payload.substack_body)} 字 / 下書き予定")
+        if cover:
+            out.append(f"見出し画像を作成（{cover}）")
+        out.extend(charts.notes + [f"⚠️ {w}" for w in charts.warnings])
+        return True
+    if not _env("SUBSTACK_COOKIE"):
+        out.append("Substack: SUBSTACK_COOKIE が未設定のためスキップ")
+        return True
+    try:
+        client = SubstackClient(_env("SUBSTACK_COOKIE"), _env("SUBSTACK_URL") or None)
+        cover = _thumbnail(payload.substack_title, stem, out, lang="fr")
+        charts = embed(payload.substack_body, media, client.upload_image, lang="fr")
+        r = client.create_draft(payload.substack_title, payload.substack_subtitle, charts.body, cover=cover)
+    except SubstackError as e:
+        out.append(f"❌ Substack: {e}")
+        return False
+    result["substack"] = {"id": r.draft_id, "edit_url": r.edit_url, "status": "draft",
+                          "cover": bool(r.cover), "charts": len(charts.notes)}
+    out.append(f"✅ Substack: 下書きに保存しました {r.edit_url}")
+    if r.cover:
+        out.append("見出し画像: 設定しました")
+    out.extend(charts.notes + [f"⚠️ {w}" for w in charts.warnings + r.warnings])
+    return True
 
 
 def _summary(lines: list[str]) -> None:
@@ -124,6 +166,10 @@ def process(path: Path, *, dry_run: bool) -> bool:
             except NoteError as e:
                 ok = False
                 out.append(f"❌ note: {e}")
+
+    # ---- Substack（仏語記事。下書きのみ）
+    if payload.substack_title:
+        ok = _substack(payload, path.stem, result, out, dry_run=dry_run) and ok
 
     # ---- X
     if payload.x_posts:
