@@ -504,6 +504,15 @@ class GmailExtractTest(unittest.TestCase):
         self.assertEqual(_unlink("voir https://www.google.com/url?q=https://example.com/a%3Fb&source=gmail&sa=E ici"),
                          "voir https://example.com/a?b ici")
 
+    def test_weekday_names_in_subject(self):
+        # 2026-10-08: Cowork が件名を「_thursday」で送ってきた
+        for word, kind in (("thursday", "weekday"), ("Monday", "weekday"), ("sunday", "weekend")):
+            stem, _ = self.extract(self.mail(subject=f"[PUBLISH] 2026-10-08_{word}"))
+            self.assertEqual(stem, f"2026-10-08_{kind}")
+        from publisher.gmail_inbox import Rejected
+        with self.assertRaises(Rejected):
+            self.extract(self.mail(subject="[PUBLISH] 2026-10-08_hello"))
+
     def test_indented_body(self):
         content = FIXTURE.read_text(encoding="utf-8")
         indented = "\n".join("    " + l if l else l for l in content.split("\n"))

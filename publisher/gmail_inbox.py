@@ -40,7 +40,11 @@ from pathlib import Path
 INBOX_DIR = Path("publish/inbox")
 STATE_FILE = Path(".gmail_fetched.json")  # fetch → mark の受け渡し用（コミットしない）
 LABEL = "published"
-SUBJECT_RE = re.compile(r"\[PUBLISH\]\s*(\d{4}-\d{2}-\d{2}_(?:weekday|weekend|test|drafttest))\b")
+SUBJECT_RE = re.compile(r"\[PUBLISH\]\s*(\d{4}-\d{2}-\d{2})_([A-Za-z]+)\b")
+# Cowork が「_weekday」の代わりに曜日名を書くことがある（2026-10-08 は「_thursday」で届いて取りこぼした）
+KINDS = {"weekday": "weekday", "weekend": "weekend", "test": "test", "drafttest": "drafttest",
+         "monday": "weekday", "tuesday": "weekday", "wednesday": "weekday", "thursday": "weekday",
+         "friday": "weekday", "saturday": "weekend", "sunday": "weekend"}
 BODY_RE = re.compile(r"-----BEGIN-----[ \t]*\r?\n(.*?)\r?\n[ \t]*-----END-----", re.S)
 TOKEN_RE = re.compile(r"^[ \t>]*TOKEN:\s*(\S+)\s*$", re.M)
 
@@ -140,8 +144,10 @@ def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
     """メール1通を検査して (ファイル名の stem, 中身) を返す。条件を満たさなければ Rejected。"""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
     m = SUBJECT_RE.search(str(msg.get("Subject", "")))
-    if not m:
+    kind = KINDS.get(m.group(2).lower()) if m else None
+    if not kind:
         raise Rejected("件名が [PUBLISH] YYYY-MM-DD_<種類> の形ではありません")
+    stem = f"{m.group(1)}_{kind}"
     from_addr = parseaddr(str(msg.get("From", "")))[1].lower()
     if from_addr != sender.lower():
         raise Rejected(f"差出人が想定外です: {from_addr}")
@@ -153,7 +159,7 @@ def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
     if not b or not b.group(1).strip():
         raise Rejected("-----BEGIN----- 〜 -----END----- の中身がありません")
     # 指示文の字下げごとコピーされた場合に備えて、共通の字下げを外す
-    return m.group(1), _unlink(textwrap.dedent(b.group(1)).strip()) + "\n"
+    return stem, _unlink(textwrap.dedent(b.group(1)).strip()) + "\n"
 
 
 def _connect() -> imaplib.IMAP4_SSL:
