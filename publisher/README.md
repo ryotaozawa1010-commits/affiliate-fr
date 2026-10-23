@@ -62,7 +62,7 @@ https://github.com/ryotaozawa1010-commits/affiliate-fr/settings/variables/action
 |---|---|
 | `NOTE_MODE` | 未設定 / `draft`: 下書きに保存（既定）。`publish`: そのまま公開（**実験的**） |
 | `NOTE_URLNAME` | note の ID。通常はログイン時に自動で取れるので不要 |
-| `GMAIL_ADDRESS` / `PUBLISH_SENDER` | 受け取り用・差出人のアドレスを変えたいとき |
+| `GMAIL_ADDRESS` / `PUBLISH_SENDER` | 受け取り用・差出人のアドレスを変えたいとき。`PUBLISH_SENDER` はカンマ区切りで複数指定できる（既定: `ryotaozawa1010@gmail.com,ryota.ozawa@peaceput-france.com`） |
 
 最初の数日は `draft` で見た目（見出し・太字・箇条書きの変換）を確認し、問題なければ `publish` に切り替えるのがおすすめです。
 
