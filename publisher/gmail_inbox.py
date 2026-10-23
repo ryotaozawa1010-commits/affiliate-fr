@@ -140,8 +140,15 @@ def _unlink(text: str) -> str:
     return GOOGLE_REDIRECT.sub(back, text)
 
 
+def senders(value: str) -> list[str]:
+    """PUBLISH_SENDER は「a@x, b@y」のようにカンマ区切りで複数書ける。
+    Cowork の Gmail コネクタの送信元が変わることがある（2026-10-23 は会社アドレスから届いて取りこぼした）。"""
+    return [s.strip().lower() for s in value.split(",") if s.strip()]
+
+
 def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
-    """メール1通を検査して (ファイル名の stem, 中身) を返す。条件を満たさなければ Rejected。"""
+    """メール1通を検査して (ファイル名の stem, 中身) を返す。条件を満たさなければ Rejected。
+    sender はカンマ区切りで複数指定できる。"""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
     m = SUBJECT_RE.search(str(msg.get("Subject", "")))
     kind = KINDS.get(m.group(2).lower()) if m else None
@@ -149,7 +156,7 @@ def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
         raise Rejected("件名が [PUBLISH] YYYY-MM-DD_<種類> の形ではありません")
     stem = f"{m.group(1)}_{kind}"
     from_addr = parseaddr(str(msg.get("From", "")))[1].lower()
-    if from_addr != sender.lower():
+    if from_addr not in senders(sender):
         raise Rejected(f"差出人が想定外です: {from_addr}")
     body = _plain_text(msg).replace("\r\n", "\n")
     t = TOKEN_RE.search(body)
@@ -176,7 +183,9 @@ def fetch() -> list[str]:
     token = os.environ["PUBLISH_TOKEN"].strip()
     imap = _connect()
     # X-GM-RAW の検索語は全体を "..." で囲んで送るので、中に " を入れない（件名の厳密な確認は extract で行う）
-    query = f"from:{sender} subject:PUBLISH -label:{LABEL} newer_than:3d"
+    # Gmail の検索では { } の中に並べた条件はどれか1つに当てはまればよい（OR）
+    from_query = " ".join(f"from:{s}" for s in senders(sender))
+    query = f"{{{from_query}}} subject:PUBLISH -label:{LABEL} newer_than:3d"
     typ, data = imap.uid("SEARCH", "X-GM-RAW", f'"{query}"')
     uids = data[0].split() if typ == "OK" and data and data[0] else []
     saved, fetched = [], []

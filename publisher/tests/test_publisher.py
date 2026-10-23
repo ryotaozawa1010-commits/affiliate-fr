@@ -398,6 +398,15 @@ class GmailExtractTest(unittest.TestCase):
             with self.assertRaises(Rejected):
                 self.extract(raw)
 
+    def test_accepts_any_of_comma_separated_senders(self):
+        from publisher.gmail_inbox import Rejected, extract
+
+        # 2026-10-23: Cowork のメールが会社アドレスから届き、差出人の確認で弾かれた
+        both = f"other@company.example, {self.ADDR.upper()}"
+        self.assertEqual(extract(self.mail(), sender=both, token="secret-token")[0], "2026-10-04_weekend")
+        with self.assertRaises(Rejected):
+            extract(self.mail(sender="evil@example.com"), sender=both, token="secret-token")
+
     def test_fetch_and_mark_with_fake_imap(self):
         from publisher import gmail_inbox
 
@@ -416,7 +425,7 @@ class GmailExtractTest(unittest.TestCase):
 
             def uid(self, cmd, *args):
                 if cmd == "SEARCH":
-                    assert "-label:published" in args[1] and f"from:{GmailExtractTest.ADDR}" in args[1]
+                    assert "-label:published" in args[1] and f"from:{GmailExtractTest.ADDR.lower()}" in args[1]
                     # 全体を囲む " 以外に " が入ると Gmail が「Could not parse command」を返す
                     assert args[1].startswith('"') and args[1].endswith('"') and '"' not in args[1][1:-1]
                     return "OK", [b"7 8"]
