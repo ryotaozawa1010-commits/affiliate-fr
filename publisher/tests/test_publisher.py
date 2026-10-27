@@ -407,6 +407,16 @@ class GmailExtractTest(unittest.TestCase):
         with self.assertRaises(Rejected):
             extract(self.mail(sender="evil@example.com"), sender=both, token="secret-token")
 
+    def test_domain_sender_and_short_weekday(self):
+        from publisher.gmail_inbox import Rejected, extract
+
+        # 2026-10-27: 会社の別表記アドレスから「_tue」という件名で届いた
+        mail = self.mail(sender="someone@company.example", subject="[PUBLISH] 2026-10-27_tue")
+        self.assertEqual(extract(mail, sender="me@gmail.com,@company.example", token="secret-token")[0],
+                         "2026-10-27_weekday")
+        with self.assertRaises(Rejected):  # ドメイン末尾だけ似ている別ドメインは通さない
+            extract(self.mail(sender="x@evilcompany.example"), sender="@company.example", token="secret-token")
+
     def test_fetch_and_mark_with_fake_imap(self):
         from publisher import gmail_inbox
 
