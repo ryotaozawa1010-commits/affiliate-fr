@@ -44,7 +44,10 @@ SUBJECT_RE = re.compile(r"\[PUBLISH\]\s*(\d{4}-\d{2}-\d{2})_([A-Za-z]+)\b")
 # Cowork が「_weekday」の代わりに曜日名を書くことがある（2026-10-08 は「_thursday」で届いて取りこぼした）
 KINDS = {"weekday": "weekday", "weekend": "weekend", "test": "test", "drafttest": "drafttest",
          "monday": "weekday", "tuesday": "weekday", "wednesday": "weekday", "thursday": "weekday",
-         "friday": "weekday", "saturday": "weekend", "sunday": "weekend"}
+         "friday": "weekday", "saturday": "weekend", "sunday": "weekend",
+         # 2026-10-27 は「_tue」のような略称で届いた
+         "mon": "weekday", "tue": "weekday", "wed": "weekday", "thu": "weekday", "fri": "weekday",
+         "sat": "weekend", "sun": "weekend"}
 BODY_RE = re.compile(r"-----BEGIN-----[ \t]*\r?\n(.*?)\r?\n[ \t]*-----END-----", re.S)
 TOKEN_RE = re.compile(r"^[ \t>]*TOKEN:\s*(\S+)\s*$", re.M)
 
@@ -142,7 +145,9 @@ def _unlink(text: str) -> str:
 
 def senders(value: str) -> list[str]:
     """PUBLISH_SENDER は「a@x, b@y」のようにカンマ区切りで複数書ける。
-    Cowork の Gmail コネクタの送信元が変わることがある（2026-10-23 は会社アドレスから届いて取りこぼした）。"""
+    Cowork の Gmail コネクタの送信元が変わることがある（2026-10-23 は会社アドレスから届いて取りこぼした）。
+    「@example.com」のように @ から始めると、そのドメインのアドレスすべてを受け付ける
+    （2026-10-27 は同じ会社の別表記のアドレスから届いた）。合言葉（TOKEN）の確認は別に必ず行う。"""
     return [s.strip().lower() for s in value.split(",") if s.strip()]
 
 
@@ -156,7 +161,7 @@ def extract(raw: bytes, *, sender: str, token: str) -> tuple[str, str]:
         raise Rejected("件名が [PUBLISH] YYYY-MM-DD_<種類> の形ではありません")
     stem = f"{m.group(1)}_{kind}"
     from_addr = parseaddr(str(msg.get("From", "")))[1].lower()
-    if from_addr not in senders(sender):
+    if not any(from_addr == s or (s.startswith("@") and from_addr.endswith(s)) for s in senders(sender)):
         raise Rejected(f"差出人が想定外です: {from_addr}")
     body = _plain_text(msg).replace("\r\n", "\n")
     t = TOKEN_RE.search(body)
@@ -184,7 +189,7 @@ def fetch() -> list[str]:
     imap = _connect()
     # X-GM-RAW の検索語は全体を "..." で囲んで送るので、中に " を入れない（件名の厳密な確認は extract で行う）
     # Gmail の検索では { } の中に並べた条件はどれか1つに当てはまればよい（OR）
-    from_query = " ".join(f"from:{s}" for s in senders(sender))
+    from_query = " ".join(f"from:{s.lstrip('@')}" for s in senders(sender))
     query = f"{{{from_query}}} subject:PUBLISH -label:{LABEL} newer_than:3d"
     typ, data = imap.uid("SEARCH", "X-GM-RAW", f'"{query}"')
     uids = data[0].split() if typ == "OK" and data and data[0] else []

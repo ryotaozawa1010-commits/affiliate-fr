@@ -54,7 +54,7 @@ jobs:
           GMAIL_ADDRESS: ${{ vars.GMAIL_ADDRESS || 'u1132038801@gmail.com' }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           PUBLISH_TOKEN: ${{ secrets.PUBLISH_TOKEN }}
-          PUBLISH_SENDER: ${{ vars.PUBLISH_SENDER || 'ryotaozawa1010@gmail.com,ryota.ozawa@peaceput-france.com' }}
+          PUBLISH_SENDER: ${{ vars.PUBLISH_SENDER || 'ryotaozawa1010@gmail.com,@peaceput-france.com' }}
           INPUT_FILE: ${{ inputs.file }}
         run: |
           if [ -n "$INPUT_FILE" ]; then
